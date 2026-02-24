@@ -1,112 +1,239 @@
 package com.tuner.cdituner
 
-import android.content.ComponentName
-import android.content.Context
+import android.Manifest
 import android.content.Intent
-import android.content.ServiceConnection
+import android.content.pm.PackageManager
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.Build
 import android.os.Bundle
-import android.os.IBinder
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 
 class MainActivity : ComponentActivity() {
 
-  private var usbService: UsbService? = null
-  private var isServiceBound by mutableStateOf(false)
-  private var deviceInfo by mutableStateOf<String?>(null)
+    private lateinit var connectionManager: ConnectionManager
+    private var deviceInfo by mutableStateOf<String?>(null)
 
-  private val serviceConnection = object : ServiceConnection {
-    override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
-      val binder = service as UsbService.UsbBinder
-      usbService = binder.getService()
-      isServiceBound = true
-      usbService?.findAndConnect()
-    }
-
-    override fun onServiceDisconnected(name: ComponentName?) {
-      usbService = null
-      isServiceBound = false
-    }
-  }
-
-  override fun onCreate(savedInstanceState: Bundle?) {
-    super.onCreate(savedInstanceState)
-    handleIntent(intent)
-    setContent {
-      Column(modifier = Modifier.fillMaxSize()) {
-        deviceInfo?.let {
-          Text(text = "Detected USB device: $it")
+    // Bluetooth permission launcher for Android 12+
+    private val bluetoothPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val allGranted = permissions.values.all { it }
+        if (allGranted) {
+            // Permissions granted, show device selector
+            connectionManager.showBluetoothDeviceSelector()
         }
-        AppContent(usbService)
-      }
     }
-  }
 
-  override fun onNewIntent(intent: Intent) {
-    super.onNewIntent(intent)
-    setIntent(intent)
-    handleIntent(intent)
-  }
-
-  private fun handleIntent(intent: Intent) {
-    if (UsbManager.ACTION_USB_DEVICE_ATTACHED == intent.action) {
-      val device: UsbDevice? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
-      } else {
-        @Suppress("DEPRECATION")
-        intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
-      }
-      device?.let {
-        deviceInfo = "Vendor ID: ${it.vendorId}, Product ID: ${it.productId}"
-      }
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        
+        // Initialize ConnectionManager
+        connectionManager = ConnectionManager(this)
+        
+        handleIntent(intent)
+        
+        setContent {
+            MaterialTheme {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                    MainScreen()
+                }
+            }
+        }
     }
-  }
 
-  override fun onStart() {
-    super.onStart()
-    Intent(this, UsbService::class.java).also { intent ->
-      bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIntent(intent)
     }
-  }
 
-  override fun onStop() {
-    super.onStop()
-    if (isServiceBound) {
-      unbindService(serviceConnection)
-      isServiceBound = false
+    private fun handleIntent(intent: Intent) {
+        if (UsbManager.ACTION_USB_DEVICE_ATTACHED == intent.action) {
+            val device: UsbDevice? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
+            }
+            device?.let {
+                deviceInfo = "USB Device Detected - VID: ${it.vendorId}, PID: ${it.productId}"
+                // Auto-connect to USB when device is attached
+                connectionManager.connectUsb()
+            }
+        }
     }
-  }
-}
 
-@Composable
-fun AppContent(usbService: UsbService?) {
-  val connectionStatus by usbService?.connectionStatus?.collectAsState() ?: remember { mutableStateOf("Service not connected") }
-  val cdiData by usbService?.receivedData?.collectAsState() ?: remember { mutableStateOf(null) }
+    @Composable
+    fun MainScreen() {
+        val connectionType by connectionManager.connectionType.collectAsState()
+        val connectionStatus by connectionManager.connectionStatus.collectAsState()
+        val cdiData by connectionManager.receivedData.collectAsState()
 
-  Column(modifier = Modifier.fillMaxSize()) {
-    // Status bar at the top
-    Text(
-      text = "Status: $connectionStatus",
-      modifier = Modifier.padding(8.dp),
-      style = MaterialTheme.typography.bodyMedium
-    )
-    // Terminal view takes the rest of the space
-    TerminalView(cdiData, modifier = Modifier.weight(1f))
-  }
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp)
+        ) {
+            // Connection Controls
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp)
+                ) {
+                    Text(
+                        text = "Connection Settings",
+                        style = MaterialTheme.typography.headlineSmall
+                    )
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    // Connection status
+                    Text(
+                        text = "Status: $connectionStatus",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = when {
+                            connectionStatus.contains("Connected") -> MaterialTheme.colorScheme.primary
+                            connectionStatus.contains("Error") || connectionStatus.contains("failed") -> MaterialTheme.colorScheme.error
+                            else -> MaterialTheme.colorScheme.onSurface
+                        }
+                    )
+                    
+                    deviceInfo?.let {
+                        Text(
+                            text = it,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    // Connection buttons
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // USB Connect Button
+                        Button(
+                            onClick = { connectionManager.connectUsb() },
+                            modifier = Modifier.weight(1f),
+                            enabled = connectionType != ConnectionManager.ConnectionType.USB
+                        ) {
+                            Text("USB")
+                        }
+                        
+                        // Bluetooth Connect Button
+                        Button(
+                            onClick = { 
+                                if (checkBluetoothPermissions()) {
+                                    connectionManager.showBluetoothDeviceSelector()
+                                } else {
+                                    requestBluetoothPermissions()
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                            enabled = connectionType != ConnectionManager.ConnectionType.BLUETOOTH
+                        ) {
+                            Text("Bluetooth")
+                        }
+                        
+                        // Disconnect Button
+                        if (connectionType != ConnectionManager.ConnectionType.NONE) {
+                            Button(
+                                onClick = { connectionManager.disconnect() },
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.error
+                                )
+                            ) {
+                                Text("Disconnect")
+                            }
+                        }
+                    }
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            // CDI Data Display
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp)
+                ) {
+                    Text(
+                        text = "CDI Monitor",
+                        style = MaterialTheme.typography.headlineSmall
+                    )
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    if (cdiData != null) {
+                        TerminalView(cdiData, modifier = Modifier.fillMaxSize())
+                    } else {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = when (connectionType) {
+                                    ConnectionManager.ConnectionType.NONE -> "Not connected"
+                                    else -> "Waiting for data..."
+                                },
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun checkBluetoothPermissions(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.BLUETOOTH_CONNECT
+            ) == PackageManager.PERMISSION_GRANTED
+        } else {
+            // For Android 11 and below, permissions are granted at install time
+            true
+        }
+    }
+
+    private fun requestBluetoothPermissions() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            bluetoothPermissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.BLUETOOTH_CONNECT,
+                    Manifest.permission.BLUETOOTH_SCAN
+                )
+            )
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        connectionManager.cleanup()
+    }
 }
