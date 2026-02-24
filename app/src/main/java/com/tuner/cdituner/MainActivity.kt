@@ -83,13 +83,13 @@ class MainActivity : ComponentActivity() {
         val cdiData by connectionManager.receivedData.collectAsState()
 
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp)
+            modifier = Modifier.fillMaxSize()
         ) {
             // Connection Controls
             Card(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
                 elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
             ) {
                 Column(
@@ -168,41 +168,33 @@ class MainActivity : ComponentActivity() {
                 }
             }
             
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(8.dp))
             
-            // CDI Data Display
-            Card(
+            // CDI Data Display - Full width without card
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f),
-                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                    .weight(1f)
             ) {
-                Column(
-                    modifier = Modifier.padding(16.dp)
-                ) {
-                    Text(
-                        text = "CDI Monitor",
-                        style = MaterialTheme.typography.headlineSmall
+                // Terminal View - Full width
+                if (cdiData != null) {
+                    TerminalView(
+                        cdiData = cdiData,
+                        modifier = Modifier.fillMaxSize()
                     )
-                    
-                    Spacer(modifier = Modifier.height(8.dp))
-                    
-                    if (cdiData != null) {
-                        TerminalView(cdiData, modifier = Modifier.fillMaxSize())
-                    } else {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = when (connectionType) {
-                                    ConnectionManager.ConnectionType.NONE -> "Not connected"
-                                    else -> "Waiting for data..."
-                                },
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                } else {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = when (connectionType) {
+                                ConnectionManager.ConnectionType.NONE -> "Not connected"
+                                else -> "Waiting for data..."
+                            },
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
             }
