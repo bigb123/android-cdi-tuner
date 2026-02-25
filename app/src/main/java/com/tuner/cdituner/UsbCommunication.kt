@@ -19,22 +19,24 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.io.IOException
 
-class UsbService : Service() {
+class UsbCommunication : Service() {
 
   private val binder = UsbBinder()
   private lateinit var usbManager: UsbManager
   private var serialPort: UsbSerialPort? = null
   private var usbDeviceConnection: UsbDeviceConnection? = null
+  private var cdiProtocol: CdiProtocol? = null
+  private var usbIoHandler: UsbIoHandler? = null
 
-  private val _receivedData = MutableStateFlow<CdiData?>(null)
-  val receivedData = _receivedData.asStateFlow()
-
+  // Use CdiProtocol's data flow, but keep our own connection status for USB-specific messages
   private val _connectionStatus = MutableStateFlow("Disconnected")
   val connectionStatus = _connectionStatus.asStateFlow()
+  
+  // Expose the CdiProtocol's receivedData flow
+  val receivedData get() = cdiProtocol?.receivedData ?: MutableStateFlow<CdiDataDisplay?>(null).asStateFlow()
 
   private val job = SupervisorJob()
   private val scope = CoroutineScope(Dispatchers.IO + job)
-  private var readingJob: Job? = null
 
   private val usbReceiver = object : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -48,6 +50,36 @@ class UsbService : Service() {
           }
         }
       }
+    }
+  }
+
+  /**
+   * USB-specific implementation of CdiIoHandler
+   */
+  private inner class UsbIoHandler(private val port: UsbSerialPort) : CdiIoHandler {
+    override suspend fun write(data: ByteArray) {
+      withContext(Dispatchers.IO) {
+        port.write(data, 500)
+      }
+    }
+
+    override suspend fun read(buffer: ByteArray, timeout: Int): Int {
+      return withContext(Dispatchers.IO) {
+        port.read(buffer, timeout) ?: 0
+      }
+    }
+
+    override fun isConnected(): Boolean {
+      return serialPort != null && usbDeviceConnection != null
+    }
+
+    override fun close() {
+      try {
+        serialPort?.close()
+      } catch (e: IOException) { /* Ignore */ }
+      usbDeviceConnection?.close()
+      serialPort = null
+      usbDeviceConnection = null
     }
   }
 
@@ -102,14 +134,30 @@ class UsbService : Service() {
     }
     serialPort = driver.ports[0]
 
-    serialPort?.let {
+    serialPort?.let { port ->
       try {
-        it.open(usbDeviceConnection)
-        it.setParameters(19200, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
-        it.dtr = true
-        it.rts = true
+        port.open(usbDeviceConnection)
+        port.setParameters(19200, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
+        port.dtr = true
+        port.rts = true
+        
+        // Create IO handler and CdiProtocol
+        usbIoHandler = UsbIoHandler(port)
+        cdiProtocol = CdiProtocol(usbIoHandler!!, scope)
+        
+        // Subscribe to CdiProtocol's connection status
+        scope.launch {
+          cdiProtocol?.connectionStatus?.collect { status ->
+            _connectionStatus.value = status
+          }
+        }
+        
         _connectionStatus.value = "Connected, initializing..."
-        initializeCdi()
+        
+        // Start CDI initialization
+        scope.launch {
+          cdiProtocol?.initializeCdi()
+        }
       } catch (e: IOException) {
         _connectionStatus.value = "Error opening port: ${e.message}"
         disconnect()
@@ -117,103 +165,15 @@ class UsbService : Service() {
     }
   }
 
-  private fun initializeCdi() {
-    readingJob = scope.launch {
-      val initBytes = byteArrayOf(0x01, 0xAB.toByte(), 0xAC.toByte(), 0xA1.toByte())
-      try {
-        for (i in 1..2) {
-          serialPort?.write(initBytes, 500)
-          delay(100)
-          val response = ByteArray(64)
-          val len = serialPort?.read(response, 500) ?: 0
-          _connectionStatus.value = "Init #${i}, got ${len} bytes"
-        }
-        _connectionStatus.value = "Initialized, starting monitor"
-        startDataMonitor()
-      } catch (e: IOException) {
-        _connectionStatus.value = "Error during init: ${e.message}"
-        disconnect()
-      }
-    }
-  }
-
-  private fun startDataMonitor() {
-    readingJob = scope.launch {
-      val request = byteArrayOf(0x01, 0xAB.toByte(), 0xAC.toByte(), 0xA1.toByte())
-      var packetCount = 0
-      while (isActive) {
-        try {
-          // Send request
-          serialPort?.write(request, 500)
-          delay(100)
-
-          // Read response
-          val buffer = ByteArray(64)
-          val numBytesRead = serialPort?.read(buffer, 500) ?: 0
-
-          // Look for valid 22-byte packet starting with 0x03
-          if (numBytesRead >= 22) {
-            // Find start of packet (0x03)
-            var startIdx = -1
-            for (i in 0 until numBytesRead - 21) {
-              if (buffer[i] == 0x03.toByte() && buffer[i + 21] == 0xA9.toByte()) {
-                startIdx = i
-                break
-              }
-            }
-
-            if (startIdx >= 0) {
-              val data = buffer.sliceArray(startIdx until startIdx + 22)
-              val decoded = decodeCdiPacket(data)
-              if (decoded != null) {
-                _receivedData.value = decoded
-                packetCount++
-                _connectionStatus.value = "Connected - Packets: $packetCount"
-              }
-            }
-          } else if (numBytesRead > 0) {
-            _connectionStatus.value = "Connected - Partial data: $numBytesRead bytes"
-          }
-
-          delay(100)
-        } catch (e: IOException) {
-          _connectionStatus.value = "Connection lost: ${e.message}"
-          disconnect()
-          break
-        }
-      }
-    }
-  }
-
-  private fun decodeCdiPacket(data: ByteArray): CdiData? {
-    if (data.size != 22 || data[0] != 0x03.toByte() || data[21] != 0xA9.toByte()) {
-      return null
-    }
-
-    val rpm = ((data[1].toInt() and 0xFF) shl 8) or (data[2].toInt() and 0xFF)
-    val batteryVoltage = (data[7].toInt() and 0xFF) / 10.0f
-    val statusByte = data[8].toInt() and 0xFF
-    val timingByte = data[9].toInt() and 0xFF
-
-    return CdiData(rpm, batteryVoltage, statusByte, timingByte)
-  }
-
   private fun disconnect() {
-    readingJob?.cancel()
-    readingJob = null
-    serialPort?.let {
-      try {
-        it.close()
-      } catch (e: IOException) { /* Ignore */ }
-    }
-    usbDeviceConnection?.close()
-    serialPort = null
-    usbDeviceConnection = null
+    cdiProtocol?.disconnect()
+    cdiProtocol = null
+    usbIoHandler = null
     _connectionStatus.value = "Disconnected"
   }
 
   inner class UsbBinder : Binder() {
-    fun getService(): UsbService = this@UsbService
+    fun getService(): UsbCommunication = this@UsbCommunication
   }
 
   companion object {

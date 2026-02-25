@@ -179,7 +179,7 @@ class MainActivity : ComponentActivity() {
         // Terminal View - Full width
         if (cdiData != null) {
           TerminalView(
-            cdiData = cdiData,
+            cdiDataDisplay = cdiData,
             modifier = Modifier.fillMaxSize()
           )
         } else {

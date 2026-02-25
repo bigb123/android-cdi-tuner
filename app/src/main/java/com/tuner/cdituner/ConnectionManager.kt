@@ -21,8 +21,8 @@ class ConnectionManager(private val context: Context) {
   }
 
   private var currentConnectionType = ConnectionType.NONE
-  private var usbService: UsbService? = null
-  private var bluetoothService: BluetoothService? = null
+  private var usbCommunication: UsbCommunication? = null
+  private var bluetoothCommunication: BluetoothCommunication? = null
 
   private val _connectionType = MutableStateFlow(ConnectionType.NONE)
   val connectionType: StateFlow<ConnectionType> = _connectionType.asStateFlow()
@@ -30,49 +30,49 @@ class ConnectionManager(private val context: Context) {
   private val _connectionStatus = MutableStateFlow("Disconnected")
   val connectionStatus: StateFlow<String> = _connectionStatus.asStateFlow()
 
-  private val _receivedData = MutableStateFlow<CdiData?>(null)
-  val receivedData: StateFlow<CdiData?> = _receivedData.asStateFlow()
+  private val _receivedData = MutableStateFlow<CdiDataDisplay?>(null)
+  val receivedData: StateFlow<CdiDataDisplay?> = _receivedData.asStateFlow()
 
   private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
   private var usbObserverJob: Job? = null
   private var bluetoothObserverJob: Job? = null
 
-  private val usbServiceConnection = object : ServiceConnection {
+  private val usbCommunicationConnection = object : ServiceConnection {
     override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
-      usbService = (service as? UsbService.UsbBinder)?.getService()
+      usbCommunication = (service as? UsbCommunication.UsbBinder)?.getService()
       if (currentConnectionType == ConnectionType.USB) {
         observeUsbService()
       }
     }
 
     override fun onServiceDisconnected(name: ComponentName?) {
-      usbService = null
+      usbCommunication = null
     }
   }
 
-  private val bluetoothServiceConnection = object : ServiceConnection {
+  private val bluetoothCommunicationConnection = object : ServiceConnection {
     override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
-      bluetoothService = (service as? BluetoothService.BluetoothBinder)?.getService()
+      bluetoothCommunication = (service as? BluetoothCommunication.BluetoothBinder)?.getService()
       if (currentConnectionType == ConnectionType.BLUETOOTH) {
         observeBluetoothService()
       }
     }
 
     override fun onServiceDisconnected(name: ComponentName?) {
-      bluetoothService = null
+      bluetoothCommunication = null
     }
   }
 
   init {
     // Bind to both services
     context.bindService(
-      Intent(context, UsbService::class.java),
-      usbServiceConnection,
+      Intent(context, UsbCommunication::class.java),
+      usbCommunicationConnection,
       Context.BIND_AUTO_CREATE
     )
     context.bindService(
-      Intent(context, BluetoothService::class.java),
-      bluetoothServiceConnection,
+      Intent(context, BluetoothCommunication::class.java),
+      bluetoothCommunicationConnection,
       Context.BIND_AUTO_CREATE
     )
   }
@@ -85,7 +85,7 @@ class ConnectionManager(private val context: Context) {
     currentConnectionType = ConnectionType.USB
     _connectionType.value = ConnectionType.USB
 
-    usbService?.let {
+    usbCommunication?.let {
       observeUsbService()
       it.findAndConnect()
     } ?: run {
@@ -101,7 +101,7 @@ class ConnectionManager(private val context: Context) {
     currentConnectionType = ConnectionType.BLUETOOTH
     _connectionType.value = ConnectionType.BLUETOOTH
 
-    bluetoothService?.let {
+    bluetoothCommunication?.let {
       observeBluetoothService()
       it.connectToDevice(deviceAddress)
     } ?: run {
@@ -113,7 +113,7 @@ class ConnectionManager(private val context: Context) {
    * Show Bluetooth device selection dialog
    */
   fun showBluetoothDeviceSelector() {
-    val selector = BluetoothDeviceSelector(context) { device ->
+    val selector = BluetoothDeviceSelectionMenu(context) { device ->
       connectBluetooth(device.address)
     }
     selector.showDeviceSelectionDialog()
@@ -125,11 +125,11 @@ class ConnectionManager(private val context: Context) {
   fun disconnect() {
     when (currentConnectionType) {
       ConnectionType.USB -> {
-        // USB disconnect is handled internally by UsbService
+        // USB disconnect is handled internally by UsbCommunication
         // Just update our state
       }
       ConnectionType.BLUETOOTH -> {
-        bluetoothService?.disconnect()
+        bluetoothCommunication?.disconnect()
       }
       ConnectionType.NONE -> {
         // Already disconnected
@@ -147,8 +147,8 @@ class ConnectionManager(private val context: Context) {
     disconnect()
     scope.cancel()
     try {
-      context.unbindService(usbServiceConnection)
-      context.unbindService(bluetoothServiceConnection)
+      context.unbindService(usbCommunicationConnection)
+      context.unbindService(bluetoothCommunicationConnection)
     } catch (e: Exception) {
       // Ignore unbind errors
     }
@@ -158,7 +158,7 @@ class ConnectionManager(private val context: Context) {
     usbObserverJob?.cancel()
     bluetoothObserverJob?.cancel()
 
-    usbService?.let { service ->
+    usbCommunication?.let { service ->
       usbObserverJob = scope.launch {
         // Observe connection status
         launch {
@@ -181,7 +181,7 @@ class ConnectionManager(private val context: Context) {
     usbObserverJob?.cancel()
     bluetoothObserverJob?.cancel()
 
-    bluetoothService?.let { service ->
+    bluetoothCommunication?.let { service ->
       bluetoothObserverJob = scope.launch {
         // Observe connection status
         launch {
