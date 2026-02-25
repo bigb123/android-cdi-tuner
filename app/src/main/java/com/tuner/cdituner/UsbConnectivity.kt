@@ -19,14 +19,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.io.IOException
 
-class UsbService : Service() {
+class UsbConnectivity : Service() {
 
   private val binder = UsbBinder()
   private lateinit var usbManager: UsbManager
   private var serialPort: UsbSerialPort? = null
   private var usbDeviceConnection: UsbDeviceConnection? = null
 
-  private val _receivedData = MutableStateFlow<CdiData?>(null)
+  private val _receivedData = MutableStateFlow<CdiMessageInterpretation?>(null)
   val receivedData = _receivedData.asStateFlow()
 
   private val _connectionStatus = MutableStateFlow("Disconnected")
@@ -185,7 +185,7 @@ class UsbService : Service() {
     }
   }
 
-  private fun decodeCdiPacket(data: ByteArray): CdiData? {
+  private fun decodeCdiPacket(data: ByteArray): CdiMessageInterpretation? {
     if (data.size != 22 || data[0] != 0x03.toByte() || data[21] != 0xA9.toByte()) {
       return null
     }
@@ -195,7 +195,7 @@ class UsbService : Service() {
     val statusByte = data[8].toInt() and 0xFF
     val timingByte = data[9].toInt() and 0xFF
 
-    return CdiData(rpm, batteryVoltage, statusByte, timingByte)
+    return CdiMessageInterpretation(rpm, batteryVoltage, statusByte, timingByte)
   }
 
   private fun disconnect() {
@@ -213,7 +213,7 @@ class UsbService : Service() {
   }
 
   inner class UsbBinder : Binder() {
-    fun getService(): UsbService = this@UsbService
+    fun getService(): UsbConnectivity = this@UsbConnectivity
   }
 
   companion object {
