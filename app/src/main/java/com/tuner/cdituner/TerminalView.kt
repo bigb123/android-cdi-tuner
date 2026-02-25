@@ -6,10 +6,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Divider
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
@@ -21,20 +19,20 @@ import java.time.format.DateTimeFormatter
 
 data class CdiLogEntry(
   val timestamp: String,
-  val data: CdiData?
+  val data: CdiMessageInterpretation?
 )
 
 @Composable
-fun TerminalView(cdiData: CdiData?, modifier: Modifier = Modifier) {
+fun TerminalView(cdiMessageInterpretation: CdiMessageInterpretation?, modifier: Modifier = Modifier) {
   // Keep a history of CDI data entries
   var logEntries by remember { mutableStateOf(listOf<CdiLogEntry>()) }
   val listState = rememberLazyListState()
 
   // Add new data to the log when it arrives
-  LaunchedEffect(cdiData) {
-    cdiData?.let {
+  LaunchedEffect(cdiMessageInterpretation) {
+    cdiMessageInterpretation?.let {
       val timestamp = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"))
-      val newEntry = CdiLogEntry(timestamp, cdiData)
+      val newEntry = CdiLogEntry(timestamp, cdiMessageInterpretation)
       logEntries = logEntries + newEntry
 
       // Keep only last 100 entries to prevent memory issues

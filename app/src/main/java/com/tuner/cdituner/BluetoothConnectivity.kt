@@ -16,7 +16,7 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.util.*
 
-class BluetoothService : Service() {
+class BluetoothConnectivity : Service() {
 
   private val binder = BluetoothBinder()
   private var bluetoothAdapter: BluetoothAdapter? = null
@@ -24,7 +24,7 @@ class BluetoothService : Service() {
   private var inputStream: InputStream? = null
   private var outputStream: OutputStream? = null
 
-  private val _receivedData = MutableStateFlow<CdiData?>(null)
+  private val _receivedData = MutableStateFlow<CdiMessageInterpretation?>(null)
   val receivedData = _receivedData.asStateFlow()
 
   private val _connectionStatus = MutableStateFlow("Disconnected")
@@ -185,7 +185,7 @@ class BluetoothService : Service() {
     }
   }
 
-  private fun decodeCdiPacket(data: ByteArray): CdiData? {
+  private fun decodeCdiPacket(data: ByteArray): CdiMessageInterpretation? {
     if (data.size != 22 || data[0] != 0x03.toByte() || data[21] != 0xA9.toByte()) {
       return null
     }
@@ -195,7 +195,7 @@ class BluetoothService : Service() {
     val statusByte = data[8].toInt() and 0xFF
     val timingByte = data[9].toInt() and 0xFF
 
-    return CdiData(rpm, batteryVoltage, statusByte, timingByte)
+    return CdiMessageInterpretation(rpm, batteryVoltage, statusByte, timingByte)
   }
 
   fun disconnect() {
@@ -222,6 +222,6 @@ class BluetoothService : Service() {
   }
 
   inner class BluetoothBinder : Binder() {
-    fun getService(): BluetoothService = this@BluetoothService
+    fun getService(): BluetoothConnectivity = this@BluetoothConnectivity
   }
 }

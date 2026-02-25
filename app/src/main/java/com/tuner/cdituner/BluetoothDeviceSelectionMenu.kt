@@ -11,7 +11,7 @@ import android.view.ViewGroup
 import android.widget.ArrayAdapter
 import android.widget.TextView
 
-class BluetoothDeviceSelector(
+class BluetoothDeviceSelectionMenu(
   private val context: Context,
   private val onDeviceSelected: (BluetoothDevice) -> Unit
 ) {
