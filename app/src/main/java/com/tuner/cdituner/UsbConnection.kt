@@ -19,7 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.io.IOException
 
-class UsbConnectivity : Service() {
+class UsbConnection : Service() {
 
   private val binder = UsbBinder()
   private lateinit var usbManager: UsbManager
@@ -164,7 +164,7 @@ class UsbConnectivity : Service() {
 
             if (startIdx >= 0) {
               val data = buffer.sliceArray(startIdx until startIdx + 22)
-              val decoded = decodeCdiPacket(data)
+              val decoded = CdiCommunication.decodeCdiPacket(data)
               if (decoded != null) {
                 _receivedData.value = decoded
                 packetCount++
@@ -185,19 +185,6 @@ class UsbConnectivity : Service() {
     }
   }
 
-  private fun decodeCdiPacket(data: ByteArray): CdiMessageInterpretation? {
-    if (data.size != 22 || data[0] != 0x03.toByte() || data[21] != 0xA9.toByte()) {
-      return null
-    }
-
-    val rpm = ((data[1].toInt() and 0xFF) shl 8) or (data[2].toInt() and 0xFF)
-    val batteryVoltage = (data[7].toInt() and 0xFF) / 10.0f
-    val statusByte = data[8].toInt() and 0xFF
-    val timingByte = data[9].toInt() and 0xFF
-
-    return CdiMessageInterpretation(rpm, batteryVoltage, statusByte, timingByte)
-  }
-
   private fun disconnect() {
     readingJob?.cancel()
     readingJob = null
@@ -213,7 +200,7 @@ class UsbConnectivity : Service() {
   }
 
   inner class UsbBinder : Binder() {
-    fun getService(): UsbConnectivity = this@UsbConnectivity
+    fun getService(): UsbConnection = this@UsbConnection
   }
 
   companion object {
