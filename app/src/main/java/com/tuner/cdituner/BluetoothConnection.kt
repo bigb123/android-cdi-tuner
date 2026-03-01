@@ -23,6 +23,7 @@ class BluetoothConnection : Service() {
   private var bluetoothSocket: BluetoothSocket? = null
   private var inputStream: InputStream? = null
   private var outputStream: OutputStream? = null
+  private var deviceAddress: String? = null
 
   private val _receivedData = MutableStateFlow<CdiReceivedMessageDecoder?>(null)
   val receivedData = _receivedData.asStateFlow()
@@ -33,6 +34,10 @@ class BluetoothConnection : Service() {
   private val job = SupervisorJob()
   private val scope = CoroutineScope(Dispatchers.IO + job)
   private var readingJob: Job? = null
+
+  companion object {
+    private const val RECONNECT_DELAY_MS = 2000L
+  }
 
   // Standard SPP UUID for Serial Port Profile
   private val SPP_UUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
@@ -53,139 +58,131 @@ class BluetoothConnection : Service() {
     job.cancel()
   }
 
-  @SuppressLint("MissingPermission")
+  /**
+   * Stores the device address for reconnection.
+   * Call startCdiCommunication() after this to begin the resilient loop.
+   */
   fun connectToDevice(deviceAddress: String) {
-    if (bluetoothAdapter == null) {
-      _connectionStatus.value = "Bluetooth not available"
-      return
-    }
-
-    readingJob?.cancel()
-    disconnect()
-
-    readingJob = scope.launch {
-
-      _connectionStatus.value = "Connecting..."
-
-//      while (isActive) {
-        try {
-
-          val device: BluetoothDevice = bluetoothAdapter!!.getRemoteDevice(deviceAddress)
-
-          // Create RFCOMM socket
-          bluetoothSocket = device.createRfcommSocketToServiceRecord(SPP_UUID)
-
-          // Cancel discovery to speed up connection
-          bluetoothAdapter?.cancelDiscovery()
-
-          // Connect to the device
-          bluetoothSocket?.connect()
-
-          // Get streams
-          inputStream = bluetoothSocket?.inputStream
-          outputStream = bluetoothSocket?.outputStream
-
-          _connectionStatus.value = "Connected, initializing..."
-
-          startCdiCommunication()
-
-        } catch (e: IOException) {
-          _connectionStatus.value = "Connection failed: ${e.message}"
-          // Bluetooth tends to lose connection, but it can recover easily
-//          delay(100)
-//          continue
-          disconnect()
-//          break
-        } catch (e: SecurityException) {
-          _connectionStatus.value = "Permission denied"
-          disconnect()
-//          break
-
-        }
-      }
-//    }
+    this.deviceAddress = deviceAddress
   }
 
-//  private suspend fun initializeCdi() {
-//    try {
-//      for (i in 1..2) {
-//        outputStream?.write(CdiMessageProcessing.CDI_MESSAGE)
-//        outputStream?.flush()
-//        delay(100)
-//
-//        val response = ByteArray(64)
-//        val available = inputStream?.available() ?: 0
-//        if (available > 0) {
-//          val len = inputStream?.read(response, 0, minOf(available, 64)) ?: 0
-//          _connectionStatus.value = "Init #${i}, got ${len} bytes"
-//        }
-//      }
-//      _connectionStatus.value = "Initialized, starting monitor"
-//      startCdiCommunication()
-//    } catch (e: IOException) {
-//      _connectionStatus.value = "Error during init: ${e.message}"
-//      disconnect()
-//    }
-//  }
+  /**
+   * Opens a Bluetooth socket to the stored device address.
+   * Returns true if the connection was established successfully.
+   */
+  @SuppressLint("MissingPermission")
+  private fun openConnection(): Boolean {
+    val address = deviceAddress ?: return false
+    if (bluetoothAdapter == null) {
+      _connectionStatus.value = "Bluetooth not available"
+      return false
+    }
 
+    try {
+      val device: BluetoothDevice = bluetoothAdapter!!.getRemoteDevice(address)
+      bluetoothSocket = device.createRfcommSocketToServiceRecord(SPP_UUID)
+      bluetoothAdapter?.cancelDiscovery()
+      bluetoothSocket?.connect()
+      inputStream = bluetoothSocket?.inputStream
+      outputStream = bluetoothSocket?.outputStream
+      return true
+    } catch (e: IOException) {
+      closeSocket()
+      return false
+    } catch (e: SecurityException) {
+      _connectionStatus.value = "Permission denied"
+      closeSocket()
+      return false
+    }
+  }
+
+  /** Closes the socket and streams without touching readingJob or status. */
+  private fun closeSocket() {
+    try {
+      outputStream?.close()
+      inputStream?.close()
+      bluetoothSocket?.close()
+    } catch (_: IOException) { }
+    outputStream = null
+    inputStream = null
+    bluetoothSocket = null
+  }
+
+  /**
+   * Resilient CDI communication loop.
+   * Connects, reads packets, and automatically reconnects on failure.
+   * Keeps retrying until the job is cancelled (via disconnect()).
+   */
   fun startCdiCommunication() {
+    readingJob?.cancel()
     readingJob = scope.launch {
       var packetCount = 0
-      val buffer = ByteArray(256) // Larger buffer for Bluetooth
-      var bufferPos = 0
 
+      // Outer loop: keeps reconnecting when connection drops
       while (isActive) {
+        _connectionStatus.value = "Connecting..."
+
+        if (!openConnection()) {
+          _connectionStatus.value = "Connection failed. Retrying in ${RECONNECT_DELAY_MS / 1000}s..."
+          delay(RECONNECT_DELAY_MS)
+          continue
+        }
+
+        _connectionStatus.value = "Connected, starting CDI communication..."
+
+        val buffer = ByteArray(256)
+        var bufferPos = 0
+
+        // Inner loop: reads CDI packets while connected
         try {
-          outputStream?.write(CdiMessageProcessing.CDI_MESSAGE)
-          outputStream?.flush()
-          delay(100)
+          while (isActive) {
+            outputStream?.write(CdiMessageProcessing.CDI_MESSAGE)
+            outputStream?.flush()
+            delay(100)
 
-          // Read response
-          val available = inputStream?.available() ?: 0
-          if (available > 0) {
-            val bytesToRead = minOf(available, buffer.size - bufferPos)
-            val numBytesRead = inputStream?.read(buffer, bufferPos, bytesToRead) ?: 0
-            bufferPos += numBytesRead
+            val available = inputStream?.available() ?: 0
+            if (available > 0) {
+              val bytesToRead = minOf(available, buffer.size - bufferPos)
+              val numBytesRead = inputStream?.read(buffer, bufferPos, bytesToRead) ?: 0
+              bufferPos += numBytesRead
 
-            // Look for valid 22-byte packet starting with 0x03
-            if (bufferPos >= 22) {
-              // Find start of packet (0x03)
-              var startIdx = -1
-              for (i in 0 until bufferPos - 21) {
-                if (buffer[i] == 0x03.toByte() && buffer[i + 21] == 0xA9.toByte()) {
-                  startIdx = i
-                  break
-                }
-              }
-
-              if (startIdx >= 0) {
-                val data = buffer.sliceArray(startIdx until startIdx + 22)
-                val decoded = CdiMessageProcessing.decodeCdiPacket(data)
-                if (decoded != null) {
-                  _receivedData.value = decoded
-                  packetCount++
-                  _connectionStatus.value = "Connected - Packets: $packetCount"
+              if (bufferPos >= 22) {
+                var startIdx = -1
+                for (i in 0 until bufferPos - 21) {
+                  if (buffer[i] == 0x03.toByte() && buffer[i + 21] == 0xA9.toByte()) {
+                    startIdx = i
+                    break
+                  }
                 }
 
-                // Shift remaining data to beginning of buffer
-                val remaining = bufferPos - (startIdx + 22)
-                if (remaining > 0) {
-                  System.arraycopy(buffer, startIdx + 22, buffer, 0, remaining)
+                if (startIdx >= 0) {
+                  val data = buffer.sliceArray(startIdx until startIdx + 22)
+                  val decoded = CdiMessageProcessing.decodeCdiPacket(data)
+                  if (decoded != null) {
+                    _receivedData.value = decoded
+                    packetCount++
+                    _connectionStatus.value = "Connected - Packets: $packetCount"
+                  }
+
+                  val remaining = bufferPos - (startIdx + 22)
+                  if (remaining > 0) {
+                    System.arraycopy(buffer, startIdx + 22, buffer, 0, remaining)
+                  }
+                  bufferPos = remaining
+                } else if (bufferPos > 128) {
+                  System.arraycopy(buffer, bufferPos - 64, buffer, 0, 64)
+                  bufferPos = 64
                 }
-                bufferPos = remaining
-              } else if (bufferPos > 128) {
-                // Buffer overflow protection - keep last 64 bytes
-                System.arraycopy(buffer, bufferPos - 64, buffer, 0, 64)
-                bufferPos = 64
               }
             }
-          }
 
-          delay(100)
+            delay(100)
+          }
         } catch (e: IOException) {
-          _connectionStatus.value = "Connection lost: ${e.message}. Recovering. Waiting for CDI to turn back on."
-          disconnect()
-          break
+          // Connection lost — close socket and let the outer loop reconnect
+          _connectionStatus.value = "Connection lost. Waiting for device..."
+          closeSocket()
+          delay(RECONNECT_DELAY_MS)
         }
       }
     }
@@ -194,18 +191,8 @@ class BluetoothConnection : Service() {
   fun disconnect() {
     readingJob?.cancel()
     readingJob = null
-
-    try {
-      outputStream?.close()
-      inputStream?.close()
-      bluetoothSocket?.close()
-    } catch (e: IOException) {
-      // Ignore close errors
-    }
-
-    outputStream = null
-    inputStream = null
-    bluetoothSocket = null
+    deviceAddress = null
+    closeSocket()
     _connectionStatus.value = "Disconnected"
   }
 

@@ -41,4 +41,6 @@ object CdiMessageProcessing {
 
     return CdiReceivedMessageDecoder(rpm, batteryVoltage, statusByte, timingByte)
   }
+
+  fun extractMessageFromBytes() {}
 }
