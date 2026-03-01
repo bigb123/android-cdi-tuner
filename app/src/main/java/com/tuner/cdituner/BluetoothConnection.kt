@@ -24,7 +24,7 @@ class BluetoothConnection : Service() {
   private var inputStream: InputStream? = null
   private var outputStream: OutputStream? = null
 
-  private val _receivedData = MutableStateFlow<CdiMessageInterpretation?>(null)
+  private val _receivedData = MutableStateFlow<CdiReceivedMessageDecoder?>(null)
   val receivedData = _receivedData.asStateFlow()
 
   private val _connectionStatus = MutableStateFlow("Disconnected")
@@ -64,73 +64,79 @@ class BluetoothConnection : Service() {
     disconnect()
 
     readingJob = scope.launch {
-      try {
-        _connectionStatus.value = "Connecting..."
 
-        val device: BluetoothDevice = bluetoothAdapter!!.getRemoteDevice(deviceAddress)
+      _connectionStatus.value = "Connecting..."
 
-        // Create RFCOMM socket
-        bluetoothSocket = device.createRfcommSocketToServiceRecord(SPP_UUID)
+//      while (isActive) {
+        try {
 
-        // Cancel discovery to speed up connection
-        bluetoothAdapter?.cancelDiscovery()
+          val device: BluetoothDevice = bluetoothAdapter!!.getRemoteDevice(deviceAddress)
 
-        // Connect to the device
-        bluetoothSocket?.connect()
+          // Create RFCOMM socket
+          bluetoothSocket = device.createRfcommSocketToServiceRecord(SPP_UUID)
 
-        // Get streams
-        inputStream = bluetoothSocket?.inputStream
-        outputStream = bluetoothSocket?.outputStream
+          // Cancel discovery to speed up connection
+          bluetoothAdapter?.cancelDiscovery()
 
-        _connectionStatus.value = "Connected, initializing..."
+          // Connect to the device
+          bluetoothSocket?.connect()
 
-        // Initialize CDI communication
-        initializeCdi()
+          // Get streams
+          inputStream = bluetoothSocket?.inputStream
+          outputStream = bluetoothSocket?.outputStream
 
-      } catch (e: IOException) {
-        _connectionStatus.value = "Connection failed: ${e.message}"
-        disconnect()
-      } catch (e: SecurityException) {
-        _connectionStatus.value = "Permission denied"
-        disconnect()
-      }
-    }
-  }
+          _connectionStatus.value = "Connected, initializing..."
 
-  private suspend fun initializeCdi() {
-    val initBytes = byteArrayOf(0x01, 0xAB.toByte(), 0xAC.toByte(), 0xA1.toByte())
-    try {
-      for (i in 1..2) {
-        outputStream?.write(initBytes)
-        outputStream?.flush()
-        delay(100)
+          startCdiCommunication()
 
-        val response = ByteArray(64)
-        val available = inputStream?.available() ?: 0
-        if (available > 0) {
-          val len = inputStream?.read(response, 0, minOf(available, 64)) ?: 0
-          _connectionStatus.value = "Init #${i}, got ${len} bytes"
+        } catch (e: IOException) {
+          _connectionStatus.value = "Connection failed: ${e.message}"
+          // Bluetooth tends to lose connection, but it can recover easily
+//          delay(100)
+//          continue
+          disconnect()
+//          break
+        } catch (e: SecurityException) {
+          _connectionStatus.value = "Permission denied"
+          disconnect()
+//          break
+
         }
       }
-      _connectionStatus.value = "Initialized, starting monitor"
-      startDataMonitor()
-    } catch (e: IOException) {
-      _connectionStatus.value = "Error during init: ${e.message}"
-      disconnect()
-    }
+//    }
   }
 
-  private fun startDataMonitor() {
+//  private suspend fun initializeCdi() {
+//    try {
+//      for (i in 1..2) {
+//        outputStream?.write(CdiMessageProcessing.CDI_MESSAGE)
+//        outputStream?.flush()
+//        delay(100)
+//
+//        val response = ByteArray(64)
+//        val available = inputStream?.available() ?: 0
+//        if (available > 0) {
+//          val len = inputStream?.read(response, 0, minOf(available, 64)) ?: 0
+//          _connectionStatus.value = "Init #${i}, got ${len} bytes"
+//        }
+//      }
+//      _connectionStatus.value = "Initialized, starting monitor"
+//      startCdiCommunication()
+//    } catch (e: IOException) {
+//      _connectionStatus.value = "Error during init: ${e.message}"
+//      disconnect()
+//    }
+//  }
+
+  fun startCdiCommunication() {
     readingJob = scope.launch {
-      val request = byteArrayOf(0x01, 0xAB.toByte(), 0xAC.toByte(), 0xA1.toByte())
       var packetCount = 0
       val buffer = ByteArray(256) // Larger buffer for Bluetooth
       var bufferPos = 0
 
       while (isActive) {
         try {
-          // Send request
-          outputStream?.write(request)
+          outputStream?.write(CdiMessageProcessing.CDI_MESSAGE)
           outputStream?.flush()
           delay(100)
 
@@ -154,7 +160,7 @@ class BluetoothConnection : Service() {
 
               if (startIdx >= 0) {
                 val data = buffer.sliceArray(startIdx until startIdx + 22)
-                val decoded = CdiCommunication.decodeCdiPacket(data)
+                val decoded = CdiMessageProcessing.decodeCdiPacket(data)
                 if (decoded != null) {
                   _receivedData.value = decoded
                   packetCount++
@@ -177,7 +183,7 @@ class BluetoothConnection : Service() {
 
           delay(100)
         } catch (e: IOException) {
-          _connectionStatus.value = "Connection lost: ${e.message}"
+          _connectionStatus.value = "Connection lost: ${e.message}. Recovering. Waiting for CDI to turn back on."
           disconnect()
           break
         }

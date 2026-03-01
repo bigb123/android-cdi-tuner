@@ -26,7 +26,7 @@ class UsbConnection : Service() {
   private var serialPort: UsbSerialPort? = null
   private var usbDeviceConnection: UsbDeviceConnection? = null
 
-  private val _receivedData = MutableStateFlow<CdiMessageInterpretation?>(null)
+  private val _receivedData = MutableStateFlow<CdiReceivedMessageDecoder?>(null)
   val receivedData = _receivedData.asStateFlow()
 
   private val _connectionStatus = MutableStateFlow("Disconnected")
@@ -119,10 +119,9 @@ class UsbConnection : Service() {
 
   private fun initializeCdi() {
     readingJob = scope.launch {
-      val initBytes = byteArrayOf(0x01, 0xAB.toByte(), 0xAC.toByte(), 0xA1.toByte())
       try {
         for (i in 1..2) {
-          serialPort?.write(initBytes, 500)
+          serialPort?.write(CdiMessageProcessing.CDI_MESSAGE, 500)
           delay(100)
           val response = ByteArray(64)
           val len = serialPort?.read(response, 500) ?: 0
@@ -139,12 +138,10 @@ class UsbConnection : Service() {
 
   private fun startDataMonitor() {
     readingJob = scope.launch {
-      val request = byteArrayOf(0x01, 0xAB.toByte(), 0xAC.toByte(), 0xA1.toByte())
       var packetCount = 0
       while (isActive) {
         try {
-          // Send request
-          serialPort?.write(request, 500)
+          serialPort?.write(CdiMessageProcessing.CDI_MESSAGE, 500)
           delay(100)
 
           // Read response
@@ -164,7 +161,7 @@ class UsbConnection : Service() {
 
             if (startIdx >= 0) {
               val data = buffer.sliceArray(startIdx until startIdx + 22)
-              val decoded = CdiCommunication.decodeCdiPacket(data)
+              val decoded = CdiMessageProcessing.decodeCdiPacket(data)
               if (decoded != null) {
                 _receivedData.value = decoded
                 packetCount++

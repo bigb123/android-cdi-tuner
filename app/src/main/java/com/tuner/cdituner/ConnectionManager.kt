@@ -30,8 +30,8 @@ class ConnectionManager(private val context: Context) {
   private val _connectionStatus = MutableStateFlow("Disconnected")
   val connectionStatus: StateFlow<String> = _connectionStatus.asStateFlow()
 
-  private val _receivedData = MutableStateFlow<CdiMessageInterpretation?>(null)
-  val receivedData: StateFlow<CdiMessageInterpretation?> = _receivedData.asStateFlow()
+  private val _receivedData = MutableStateFlow<CdiReceivedMessageDecoder?>(null)
+  val receivedData: StateFlow<CdiReceivedMessageDecoder?> = _receivedData.asStateFlow()
 
   private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
   private var usbObserverJob: Job? = null
@@ -97,13 +97,14 @@ class ConnectionManager(private val context: Context) {
    * Connect via Bluetooth to a specific device
    */
   fun connectBluetooth(deviceAddress: String) {
-    disconnect()
+//    disconnect()
     currentConnectionType = ConnectionType.BLUETOOTH
     _connectionType.value = ConnectionType.BLUETOOTH
 
     bluetoothConnection?.let {
       observeBluetoothService()
       it.connectToDevice(deviceAddress)
+      it.startCdiCommunication()
     } ?: run {
       _connectionStatus.value = "Bluetooth Service not available"
     }
