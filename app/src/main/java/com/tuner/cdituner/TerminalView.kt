@@ -19,20 +19,20 @@ import java.time.format.DateTimeFormatter
 
 data class CdiLogEntry(
   val timestamp: String,
-  val data: CdiMessageInterpretation?
+  val data: CdiReceivedMessageDecoder?
 )
 
 @Composable
-fun TerminalView(cdiMessageInterpretation: CdiMessageInterpretation?, modifier: Modifier = Modifier) {
+fun TerminalView(cdiReceivedMessageDecoder: CdiReceivedMessageDecoder?, modifier: Modifier = Modifier) {
   // Keep a history of CDI data entries
   var logEntries by remember { mutableStateOf(listOf<CdiLogEntry>()) }
   val listState = rememberLazyListState()
 
   // Add new data to the log when it arrives
-  LaunchedEffect(cdiMessageInterpretation) {
-    cdiMessageInterpretation?.let {
+  LaunchedEffect(cdiReceivedMessageDecoder) {
+    cdiReceivedMessageDecoder?.let {
       val timestamp = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"))
-      val newEntry = CdiLogEntry(timestamp, cdiMessageInterpretation)
+      val newEntry = CdiLogEntry(timestamp, cdiReceivedMessageDecoder)
       logEntries = logEntries + newEntry
 
       // Keep only last 100 entries to prevent memory issues

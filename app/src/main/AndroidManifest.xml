@@ -25,8 +25,8 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.CDITuner">
-        <service android:name=".UsbConnectivity" />
-        <service android:name=".BluetoothConnectivity" />
+        <service android:name=".UsbConnection" />
+        <service android:name=".BluetoothConnection" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
