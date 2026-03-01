@@ -1,5 +1,7 @@
 package com.tuner.cdituner
 
+import kotlinx.coroutines.flow.MutableStateFlow
+
 /**
  * Utility object for decoding CDI packets from byte arrays.
  * This decoder is used by both Bluetooth and USB connectivity implementations.
@@ -23,7 +25,7 @@ object CdiMessageProcessing {
    * - Byte 9: Timing byte
    * - Byte 21: End byte (0xA9)
    */
-  fun decodeCdiPacket(data: ByteArray): CdiReceivedMessageDecoder? {
+  private fun decodeCdiPacket(data: ByteArray): CdiReceivedMessageDecoder? {
     // Validate packet structure
     if (data.size != 22 || data[0] != 0x03.toByte() || data[21] != 0xA9.toByte()) {
       return null
@@ -42,5 +44,24 @@ object CdiMessageProcessing {
     return CdiReceivedMessageDecoder(rpm, batteryVoltage, statusByte, timingByte)
   }
 
-  fun extractMessageFromBytes() {}
+  fun extractMessageFromBytes(bufferPos: Int, buffer: ByteArray): Int {
+    var startIdx = -1
+    for (i in 0 until bufferPos - 21) {
+      if (buffer[i] == 0x03.toByte() && buffer[i + 21] == 0xA9.toByte()) {
+        return i
+      }
+    }
+    return -1
+  }
+
+  fun processMessage(buffer: ByteArray, startIdx: Int, packetCount: Int, _receivedData: MutableStateFlow<CdiReceivedMessageDecoder?>, _connectionStatus: MutableStateFlow<String>): Int {
+    val message = buffer.sliceArray(startIdx until startIdx + 22)
+    val decoded = decodeCdiPacket(message)
+    if (decoded != null) {
+      _receivedData.value = decoded
+      _connectionStatus.value = "Connected - Packets: $packetCount"
+      return packetCount+1
+    }
+    return packetCount
+  }
 }

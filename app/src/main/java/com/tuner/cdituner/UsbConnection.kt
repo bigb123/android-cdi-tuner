@@ -148,25 +148,11 @@ class UsbConnection : Service() {
           val buffer = ByteArray(64)
           val numBytesRead = serialPort?.read(buffer, 500) ?: 0
 
-          // Look for valid 22-byte packet starting with 0x03
           if (numBytesRead >= 22) {
-            // Find start of packet (0x03)
-            var startIdx = -1
-            for (i in 0 until numBytesRead - 21) {
-              if (buffer[i] == 0x03.toByte() && buffer[i + 21] == 0xA9.toByte()) {
-                startIdx = i
-                break
-              }
-            }
+            var startIdx = CdiMessageProcessing.extractMessageFromBytes(numBytesRead, buffer)
 
             if (startIdx >= 0) {
-              val data = buffer.sliceArray(startIdx until startIdx + 22)
-              val decoded = CdiMessageProcessing.decodeCdiPacket(data)
-              if (decoded != null) {
-                _receivedData.value = decoded
-                packetCount++
-                _connectionStatus.value = "Connected - Packets: $packetCount"
-              }
+              packetCount = CdiMessageProcessing.processMessage(buffer, startIdx, packetCount, _receivedData, _connectionStatus)
             }
           } else if (numBytesRead > 0) {
             _connectionStatus.value = "Connected - Partial data: $numBytesRead bytes"

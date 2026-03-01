@@ -36,7 +36,7 @@ class BluetoothConnection : Service() {
   private var readingJob: Job? = null
 
   companion object {
-    private const val RECONNECT_DELAY_MS = 2000L
+    private const val RECONNECT_DELAY_MS = 1000L
   }
 
   // Standard SPP UUID for Serial Port Profile
@@ -117,6 +117,7 @@ class BluetoothConnection : Service() {
     readingJob?.cancel()
     readingJob = scope.launch {
       var packetCount = 0
+      var decoded: CdiReceivedMessageDecoder? = null
 
       // Outer loop: keeps reconnecting when connection drops
       while (isActive) {
@@ -147,23 +148,10 @@ class BluetoothConnection : Service() {
               bufferPos += numBytesRead
 
               if (bufferPos >= 22) {
-                var startIdx = -1
-                for (i in 0 until bufferPos - 21) {
-                  if (buffer[i] == 0x03.toByte() && buffer[i + 21] == 0xA9.toByte()) {
-                    startIdx = i
-                    break
-                  }
-                }
+                var startIdx = CdiMessageProcessing.extractMessageFromBytes(bufferPos, buffer)
 
                 if (startIdx >= 0) {
-                  val data = buffer.sliceArray(startIdx until startIdx + 22)
-                  val decoded = CdiMessageProcessing.decodeCdiPacket(data)
-                  if (decoded != null) {
-                    _receivedData.value = decoded
-                    packetCount++
-                    _connectionStatus.value = "Connected - Packets: $packetCount"
-                  }
-
+                  packetCount = CdiMessageProcessing.processMessage(buffer, startIdx, packetCount, _receivedData, _connectionStatus)
                   val remaining = bufferPos - (startIdx + 22)
                   if (remaining > 0) {
                     System.arraycopy(buffer, startIdx + 22, buffer, 0, remaining)
