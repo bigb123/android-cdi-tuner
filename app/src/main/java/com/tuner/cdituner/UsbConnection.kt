@@ -109,28 +109,9 @@ class UsbConnection : Service() {
         it.dtr = true
         it.rts = true
         _connectionStatus.value = "Connected, initializing..."
-        initializeCdi()
-      } catch (e: IOException) {
-        _connectionStatus.value = "Error opening port: ${e.message}"
-        disconnect()
-      }
-    }
-  }
-
-  private fun initializeCdi() {
-    readingJob = scope.launch {
-      try {
-        for (i in 1..2) {
-          serialPort?.write(CdiMessageProcessing.CDI_MESSAGE, 500)
-          delay(100)
-          val response = ByteArray(64)
-          val len = serialPort?.read(response, 500) ?: 0
-          _connectionStatus.value = "Init #${i}, got ${len} bytes"
-        }
-        _connectionStatus.value = "Initialized, starting monitor"
         startDataMonitor()
       } catch (e: IOException) {
-        _connectionStatus.value = "Error during init: ${e.message}"
+        _connectionStatus.value = "Error opening port: ${e.message}"
         disconnect()
       }
     }
