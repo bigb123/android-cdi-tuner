@@ -79,7 +79,7 @@ fun TerminalView(cdiReceivedMessageDecoder: CdiReceivedMessageDecoder?, modifier
         modifier = Modifier.weight(0.15f)
       )
       Text(
-        text = "Battery",
+        text = "Cdi Voltage",
         color = Color.Green,
         fontFamily = FontFamily.Monospace,
         fontWeight = FontWeight.Bold,
@@ -143,7 +143,7 @@ fun CdiDataRow(entry: CdiLogEntry) {
         modifier = Modifier.weight(0.15f)
       )
       Text(
-        text = String.format("%.1fV", data.batteryVoltage),
+        text = String.format("%.1fV", data.CdiVoltage),
         color = Color.Green,
         fontFamily = FontFamily.Monospace,
         fontSize = 11.sp,
