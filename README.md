@@ -9,3 +9,7 @@ Check releases to learn more about currently supported functionality.
 ## Disclaimer - AI was used to build this project
 
 Claude Opus 4.1 and 4.6 was used to make the project real.
+
+## Special thanks
+
+Thanks to [SimpleBluetoothTerminal](https://github.com/kai-morich/SimpleBluetoothTerminal) for inspiration on how to handle Bluetooth devices choice menu!
