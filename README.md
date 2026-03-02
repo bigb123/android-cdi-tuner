@@ -5,3 +5,7 @@ The idea of the application is to support displaying useful information about Co
 CDI is responsible for triggering a spark in the cylinder. We can tune ignition timing.
 
 Check releases to learn more about currently supported functionality.
+
+## Disclaimer - AI was used to build this project
+
+Claude Opus 4.1 and 4.6 was used to make the project real.
