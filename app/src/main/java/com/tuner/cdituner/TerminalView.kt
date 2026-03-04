@@ -87,15 +87,7 @@ fun TerminalView(cdiReceivedMessageDecoder: CdiReceivedMessageDecoder?, modifier
         modifier = Modifier.weight(0.2f)
       )
       Text(
-        text = "Status",
-        color = Color.Green,
-        fontFamily = FontFamily.Monospace,
-        fontWeight = FontWeight.Bold,
-        fontSize = 12.sp,
-        modifier = Modifier.weight(0.25f)
-      )
-      Text(
-        text = "Timing",
+        text = "Timing angle",
         color = Color.Green,
         fontFamily = FontFamily.Monospace,
         fontWeight = FontWeight.Bold,
@@ -143,21 +135,14 @@ fun CdiDataRow(entry: CdiLogEntry) {
         modifier = Modifier.weight(0.15f)
       )
       Text(
-        text = String.format("%.1fV", data.CdiVoltage),
+        text = String.format("%.1fV", data.cdiVoltage),
         color = Color.Green,
         fontFamily = FontFamily.Monospace,
         fontSize = 11.sp,
         modifier = Modifier.weight(0.2f)
       )
       Text(
-        text = String.format("0x%02X (%3d)", data.statusByte, data.statusByte),
-        color = Color.Green,
-        fontFamily = FontFamily.Monospace,
-        fontSize = 11.sp,
-        modifier = Modifier.weight(0.25f)
-      )
-      Text(
-        text = String.format("0x%02X (%3d)", data.timingByte, data.timingByte),
+        text = String.format("%.1f", data.timingAngle),
         color = Color.Green,
         fontFamily = FontFamily.Monospace,
         fontSize = 11.sp,

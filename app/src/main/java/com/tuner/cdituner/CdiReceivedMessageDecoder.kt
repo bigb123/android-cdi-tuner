@@ -2,7 +2,6 @@ package com.tuner.cdituner
 
 data class CdiReceivedMessageDecoder(
   val rpm: Int = 0,
-  val CdiVoltage: Float = 0.0f,
-  val statusByte: Int = 0,
-  val timingByte: Int = 0,
+  val cdiVoltage: Float = 0.0f,
+  val timingAngle: Float = 0.0f
 )
