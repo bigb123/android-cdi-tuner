@@ -85,9 +85,14 @@ class ConnectionManager(private val context: Context) {
     currentConnectionType = ConnectionType.USB
     _connectionType.value = ConnectionType.USB
 
-    usbConnection?.let {
+    usbConnection?.let { usb ->
       observeUsbService()
-      it.findAndConnect()
+      // Launch a coroutine to call the suspend function
+      scope.launch {
+        while (usb.findAndConnect() != 0) {
+          delay(1000)
+        }
+      }
     } ?: run {
       _connectionStatus.value = "USB Service not available"
     }

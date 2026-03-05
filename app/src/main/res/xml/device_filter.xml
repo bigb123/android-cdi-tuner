@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+<!--    This doesn't really work well if cable is disconnected and connected again. Cable stays undetected-->
     <!-- 0x0403 = FTDI -->
-    <usb-device vendor-id="1027" />
+<!--    <usb-device vendor-id="1027" />-->
 </resources>
