@@ -6,6 +6,10 @@ CDI is responsible for triggering a spark in the cylinder. We can tune ignition 
 
 Check releases to learn more about currently supported functionality.
 
+## Bluetooth requirements
+
+Make sure the device is already added to Bluetooth devices. It has to be on the list of Android's known devices. It doesn't have to be connected.
+
 ## Disclaimer - AI was used to build this project
 
 Claude Opus 4.1 and 4.6 was used to make the project real.
