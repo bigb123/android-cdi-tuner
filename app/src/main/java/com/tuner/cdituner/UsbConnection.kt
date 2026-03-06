@@ -198,7 +198,7 @@ class UsbConnection : Service() {
     }
   }
 
-  private fun disconnect() {
+  fun disconnect() {
     readingJob?.cancel()
     readingJob = null
     serialPort?.let {

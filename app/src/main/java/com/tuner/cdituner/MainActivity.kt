@@ -190,7 +190,7 @@ class MainActivity : ComponentActivity() {
             Text(
               text = when (connectionType) {
                 ConnectionManager.ConnectionType.NONE -> "Not connected"
-                else -> "Waiting for data..."
+                else -> "Waiting for CDI..."
               },
               style = MaterialTheme.typography.bodyLarge,
               color = MaterialTheme.colorScheme.onSurfaceVariant
