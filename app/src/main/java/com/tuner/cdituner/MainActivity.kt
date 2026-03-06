@@ -22,6 +22,9 @@ class MainActivity : ComponentActivity() {
 
   private lateinit var connectionManager: ConnectionManager
   private var deviceInfo by mutableStateOf<String?>(null)
+  
+  // Track if the app was launched by USB attachment (to skip auto-connect from preferences)
+  private var launchedByUsb = false
 
   // Bluetooth permission launcher for Android 12+
   private val bluetoothPermissionLauncher = registerForActivityResult(
@@ -40,7 +43,13 @@ class MainActivity : ComponentActivity() {
     // Initialize ConnectionManager
     connectionManager = ConnectionManager(this)
 
-    handleIntent(intent)
+    // Check if launched by USB attachment
+    launchedByUsb = handleIntent(intent)
+    
+    // If NOT launched by USB, auto-connect based on saved preferences
+    if (!launchedByUsb) {
+      connectionManager.autoConnectFromPreferences()
+    }
 
     setContent {
       MaterialTheme {
@@ -60,7 +69,11 @@ class MainActivity : ComponentActivity() {
     handleIntent(intent)
   }
 
-  private fun handleIntent(intent: Intent) {
+  /**
+   * Handle incoming intent.
+   * Returns true if the intent was a USB device attachment (app was auto-started by USB).
+   */
+  private fun handleIntent(intent: Intent): Boolean {
     if (UsbManager.ACTION_USB_DEVICE_ATTACHED == intent.action) {
       val device: UsbDevice? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
@@ -72,8 +85,10 @@ class MainActivity : ComponentActivity() {
         deviceInfo = "USB Device Detected - VID: ${it.vendorId}, PID: ${it.productId}"
         // Auto-connect to USB when device is attached
         connectionManager.connectUsb()
+        return true
       }
     }
+    return false
   }
 
   @Composable

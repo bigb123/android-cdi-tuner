@@ -28,6 +28,12 @@ class ConnectionManager(private val context: Context) {
   private var usbServiceBound = false
   private var bluetoothServiceBound = false
 
+  // Preferences for saving/loading connection settings
+  private val preferences = ConnectionPreferences(context)
+  
+  // Track the last connected Bluetooth address (for saving to preferences)
+  private var lastBluetoothAddress: String? = null
+
   private val _connectionType = MutableStateFlow(ConnectionType.NONE)
   val connectionType: StateFlow<ConnectionType> = _connectionType.asStateFlow()
 
@@ -90,7 +96,10 @@ class ConnectionManager(private val context: Context) {
    * Waits for service to be bound if not already available
    */
   fun connectUsb() {
+
+    // Close other connection if any before attempting to establish a new connection
     disconnect()
+
     // Don't set connection type yet - wait until we know connection succeeded
     
     scope.launch {
@@ -119,18 +128,42 @@ class ConnectionManager(private val context: Context) {
 
   /**
    * Connect via Bluetooth to a specific device
+   * Waits for service to be bound if not already available
    */
-  fun connectBluetooth(deviceAddress: String) {
-//    disconnect()
+  fun connectBluetooth(deviceAddress: String, deviceName: String? = null) {
+    
+    // Close other connection if any before attempting to establish a new connection
+    disconnect()
+
     currentConnectionType = ConnectionType.BLUETOOTH
     _connectionType.value = ConnectionType.BLUETOOTH
+    
+    // Save the address for later preference saving
+    lastBluetoothAddress = deviceAddress
 
-    bluetoothConnection?.let {
-      observeBluetoothService()
-      it.connectToDevice(deviceAddress)
-      it.startCdiCommunication()
-    } ?: run {
-      _connectionStatus.value = "Bluetooth Service not available"
+    scope.launch {
+      // Wait for Bluetooth service to be bound (with timeout)
+      val maxWaitTime = 5000L // 5 seconds timeout
+      val startTime = System.currentTimeMillis()
+      
+      while (!bluetoothServiceBound && (System.currentTimeMillis() - startTime) < maxWaitTime) {
+        _connectionStatus.value = "BT: Waiting for service..."
+        delay(100)
+      }
+      
+      bluetoothConnection?.let {
+        observeBluetoothService()
+        it.connectToDevice(deviceAddress)
+        it.startCdiCommunication()
+        
+        // Save Bluetooth device to preferences
+        preferences.saveBluetoothDevice(deviceAddress, deviceName)
+        preferences.saveConnectionType(ConnectionType.BLUETOOTH)
+      } ?: run {
+        _connectionStatus.value = "BT: Service not available (timeout)"
+        currentConnectionType = ConnectionType.NONE
+        _connectionType.value = ConnectionType.NONE
+      }
     }
   }
 
@@ -139,10 +172,41 @@ class ConnectionManager(private val context: Context) {
    */
   fun showBluetoothDeviceSelector() {
     val selector = BluetoothDeviceSelectionMenu(context) { device ->
-      connectBluetooth(device.address)
+      connectBluetooth(device.address, device.name)
     }
     selector.showDeviceSelectionDialog()
   }
+
+  /**
+   * Auto-connect based on saved preferences.
+   * Call this on app startup when NOT triggered by USB attachment.
+   */
+  fun autoConnectFromPreferences() {
+    when (preferences.getLastConnectionType()) {
+      ConnectionType.USB -> {
+        connectUsb()
+      }
+      ConnectionType.BLUETOOTH -> {
+        val address = preferences.getLastBluetoothAddress()
+        if (address != null) {
+          connectBluetooth(address, preferences.getLastBluetoothName())
+        }
+      }
+      ConnectionType.NONE -> {
+        // No saved preference, do nothing
+      }
+    }
+  }
+
+  /**
+   * Get the last saved connection type (for UI display purposes)
+   */
+  fun getLastConnectionType(): ConnectionType = preferences.getLastConnectionType()
+
+  /**
+   * Get the last saved Bluetooth device name (for UI display purposes)
+   */
+  fun getLastBluetoothName(): String? = preferences.getLastBluetoothName()
 
   /**
    * Disconnect current connection
@@ -195,6 +259,8 @@ class ConnectionManager(private val context: Context) {
                 // Successfully connected - set connection type to USB
                 currentConnectionType = ConnectionType.USB
                 _connectionType.value = ConnectionType.USB
+                // Save USB as the preferred connection type
+                preferences.saveConnectionType(ConnectionType.USB)
               }
               status.contains("Permission not granted") ||
               status.contains("Permission denied") ||
