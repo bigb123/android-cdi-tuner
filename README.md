@@ -12,7 +12,7 @@ Make sure the device is already added to Bluetooth devices. It has to be on the 
 
 ## Disclaimer - AI was used to build this project
 
-Claude Opus 4.1 and 4.6 was used to make the project real.
+Claude Opus 4.1, 4.5 and 4.6 was used to make the project real.
 
 ## Special thanks
 
