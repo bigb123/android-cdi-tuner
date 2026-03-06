@@ -82,9 +82,8 @@ class ConnectionManager(private val context: Context) {
    */
   fun connectUsb() {
     disconnect()
-    currentConnectionType = ConnectionType.USB
-    _connectionType.value = ConnectionType.USB
-
+    // Don't set connection type yet - wait until we know connection succeeded
+    
     usbConnection?.let { usb ->
       observeUsbService()
       // Launch a coroutine to call the suspend function
@@ -92,6 +91,8 @@ class ConnectionManager(private val context: Context) {
         while (usb.findAndConnect() != 0) {
           delay(1000)
         }
+        // After findAndConnect returns 0, check if we actually connected
+        // by observing the connection status
       }
     } ?: run {
       _connectionStatus.value = "USB Service not available"
@@ -131,8 +132,7 @@ class ConnectionManager(private val context: Context) {
   fun disconnect() {
     when (currentConnectionType) {
       ConnectionType.USB -> {
-        // USB disconnect is handled internally by UsbConnection
-        // Just update our state
+        usbConnection?.disconnect()
       }
       ConnectionType.BLUETOOTH -> {
         bluetoothConnection?.disconnect()
@@ -170,6 +170,23 @@ class ConnectionManager(private val context: Context) {
         launch {
           service.connectionStatus.collect { status ->
             _connectionStatus.value = "USB: $status"
+            
+            // Update connection type based on actual status
+            when {
+              status.contains("Connected") -> {
+                // Successfully connected - set connection type to USB
+                currentConnectionType = ConnectionType.USB
+                _connectionType.value = ConnectionType.USB
+              }
+              status.contains("Permission not granted") ||
+              status.contains("Permission denied") ||
+              status == "Disconnected" -> {
+                // Permission denied or disconnected - reset to NONE
+                currentConnectionType = ConnectionType.NONE
+                _connectionType.value = ConnectionType.NONE
+              }
+              // For other statuses (like "No serial devices found"), keep current state
+            }
           }
         }
 
