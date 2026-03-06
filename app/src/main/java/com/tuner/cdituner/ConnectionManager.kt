@@ -23,6 +23,10 @@ class ConnectionManager(private val context: Context) {
   private var currentConnectionType = ConnectionType.NONE
   private var usbConnection: UsbConnection? = null
   private var bluetoothConnection: BluetoothConnection? = null
+  
+  // Flags to track service binding status
+  private var usbServiceBound = false
+  private var bluetoothServiceBound = false
 
   private val _connectionType = MutableStateFlow(ConnectionType.NONE)
   val connectionType: StateFlow<ConnectionType> = _connectionType.asStateFlow()
@@ -40,6 +44,7 @@ class ConnectionManager(private val context: Context) {
   private val usbConnectionConnection = object : ServiceConnection {
     override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
       usbConnection = (service as? UsbConnection.UsbBinder)?.getService()
+      usbServiceBound = true
       if (currentConnectionType == ConnectionType.USB) {
         observeUsbService()
       }
@@ -47,12 +52,14 @@ class ConnectionManager(private val context: Context) {
 
     override fun onServiceDisconnected(name: ComponentName?) {
       usbConnection = null
+      usbServiceBound = false
     }
   }
 
   private val bluetoothConnectionConnection = object : ServiceConnection {
     override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
       bluetoothConnection = (service as? BluetoothConnection.BluetoothBinder)?.getService()
+      bluetoothServiceBound = true
       if (currentConnectionType == ConnectionType.BLUETOOTH) {
         observeBluetoothService()
       }
@@ -60,6 +67,7 @@ class ConnectionManager(private val context: Context) {
 
     override fun onServiceDisconnected(name: ComponentName?) {
       bluetoothConnection = null
+      bluetoothServiceBound = false
     }
   }
 
@@ -79,23 +87,33 @@ class ConnectionManager(private val context: Context) {
 
   /**
    * Connect via USB
+   * Waits for service to be bound if not already available
    */
   fun connectUsb() {
     disconnect()
     // Don't set connection type yet - wait until we know connection succeeded
     
-    usbConnection?.let { usb ->
-      observeUsbService()
-      // Launch a coroutine to call the suspend function
-      scope.launch {
+    scope.launch {
+      // Wait for USB service to be bound (with timeout)
+      val maxWaitTime = 5000L // 5 seconds timeout
+      val startTime = System.currentTimeMillis()
+      
+      while (!usbServiceBound && (System.currentTimeMillis() - startTime) < maxWaitTime) {
+        _connectionStatus.value = "Waiting for USB service..."
+        delay(100)
+      }
+      
+      usbConnection?.let { usb ->
+        observeUsbService()
+        // Call the suspend function to find and connect
         while (usb.findAndConnect() != 0) {
           delay(1000)
         }
         // After findAndConnect returns 0, check if we actually connected
         // by observing the connection status
+      } ?: run {
+        _connectionStatus.value = "USB Service not available (timeout)"
       }
-    } ?: run {
-      _connectionStatus.value = "USB Service not available"
     }
   }
 
