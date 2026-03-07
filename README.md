@@ -6,8 +6,8 @@ CDI is responsible for triggering a spark in the cylinder. We can tune ignition 
 
 Check releases to learn more about currently supported functionality.
 
-<img width="400"  alt="v2 0 bright" src="docs\img\bright.png" />
-<img width="400"  alt="v2 0 dark" src="docs\img\dark.png" />
+<img width="300"  alt="v2 0 bright" src="docs\img\bright.png" />
+<img width="300"  alt="v2 0 dark" src="docs\img\dark.png" />
 
 ## Bluetooth requirements
 
