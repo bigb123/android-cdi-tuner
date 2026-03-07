@@ -131,7 +131,7 @@ class ConnectionManager(private val context: Context) {
    * Waits for service to be bound if not already available
    */
   fun connectBluetooth(deviceAddress: String, deviceName: String? = null) {
-    
+
     // Close other connection if any before attempting to establish a new connection
     disconnect()
 
