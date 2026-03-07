@@ -6,21 +6,24 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.tuner.cdituner.ui.theme.LocalGaugeColors
 
 /**
  * Main gauges dashboard screen for motorcycle riding.
  * Features a large RPM gauge and smaller voltage/timing gauges.
  * Designed for easy visibility while riding.
+ * Uses theme colors from LocalGaugeColors for day/night mode support.
  */
 @Composable
 fun GaugesScreen(
   cdiData: CdiReceivedMessageDecoder?,
   modifier: Modifier = Modifier
 ) {
+  val gaugeColors = LocalGaugeColors.current
+  
   val rpm = cdiData?.rpm?.toFloat() ?: 0f
   val voltage = cdiData?.cdiVoltage ?: 0f
   val timing = cdiData?.timingAngle ?: 0f
@@ -28,7 +31,7 @@ fun GaugesScreen(
   Column(
     modifier = modifier
       .fillMaxSize()
-      .background(Color(0xFF0A0A0A))
+      .background(gaugeColors.gaugeBackground)
       .padding(16.dp),
     horizontalAlignment = Alignment.CenterHorizontally,
     verticalArrangement = Arrangement.SpaceEvenly
@@ -42,9 +45,9 @@ fun GaugesScreen(
       unit = "RPM",
       modifier = Modifier.padding(8.dp),
       size = 280.dp,
-      arcColor = Color(0xFF00FF00), // Bright green
-      warningThreshold = 9000f,
-      dangerThreshold = 11000f,
+      arcColor = gaugeColors.rpmArc,
+      warningThreshold = 8000f,
+      dangerThreshold = 10000f,
       decimalPlaces = 0
     )
 
@@ -63,7 +66,7 @@ fun GaugesScreen(
         maxValue = 20f,
         label = "CDI VOLTAGE",
         unit = "V",
-        arcColor = Color(0xFF00AAFF), // Blue
+        arcColor = gaugeColors.voltageArc,
         warningLow = 10f,
         warningHigh = 16f,
         decimalPlaces = 1
@@ -76,7 +79,7 @@ fun GaugesScreen(
         maxValue = 60f,
         label = "TIMING",
         unit = "°",
-        arcColor = Color(0xFFFFAA00), // Orange
+        arcColor = gaugeColors.timingArc,
         warningHigh = 50f,
         decimalPlaces = 1
       )
@@ -85,8 +88,8 @@ fun GaugesScreen(
     // Connection status indicator at bottom
     if (cdiData == null) {
       Text(
-        text = "Waiting for CDI data...",
-        color = Color(0xFF666666),
+        text = "Waiting for CDI connection...",
+        color = gaugeColors.labelText,
         fontSize = 14.sp,
         fontWeight = FontWeight.Medium
       )

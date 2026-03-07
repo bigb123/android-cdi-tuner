@@ -6,14 +6,15 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Divider
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.tuner.cdituner.ui.theme.LocalGaugeColors
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 
@@ -24,6 +25,8 @@ data class CdiLogEntry(
 
 @Composable
 fun TerminalView(cdiReceivedMessageDecoder: CdiReceivedMessageDecoder?, modifier: Modifier = Modifier) {
+  val gaugeColors = LocalGaugeColors.current
+  
   // Keep a history of CDI data entries
   var logEntries by remember { mutableStateOf(listOf<CdiLogEntry>()) }
   val listState = rememberLazyListState()
@@ -52,7 +55,7 @@ fun TerminalView(cdiReceivedMessageDecoder: CdiReceivedMessageDecoder?, modifier
   Column(
     modifier = modifier
       .fillMaxSize()
-      .background(Color.Black)
+      .background(gaugeColors.terminalBackground)
       .padding(8.dp)
   ) {
     // Header
@@ -64,7 +67,7 @@ fun TerminalView(cdiReceivedMessageDecoder: CdiReceivedMessageDecoder?, modifier
     ) {
       Text(
         text = "Time",
-        color = Color.Green,
+        color = gaugeColors.terminalHeader,
         fontFamily = FontFamily.Monospace,
         fontWeight = FontWeight.Bold,
         fontSize = 12.sp,
@@ -72,7 +75,7 @@ fun TerminalView(cdiReceivedMessageDecoder: CdiReceivedMessageDecoder?, modifier
       )
       Text(
         text = "RPM",
-        color = Color.Green,
+        color = gaugeColors.terminalHeader,
         fontFamily = FontFamily.Monospace,
         fontWeight = FontWeight.Bold,
         fontSize = 12.sp,
@@ -80,7 +83,7 @@ fun TerminalView(cdiReceivedMessageDecoder: CdiReceivedMessageDecoder?, modifier
       )
       Text(
         text = "Cdi Voltage",
-        color = Color.Green,
+        color = gaugeColors.terminalHeader,
         fontFamily = FontFamily.Monospace,
         fontWeight = FontWeight.Bold,
         fontSize = 12.sp,
@@ -88,7 +91,7 @@ fun TerminalView(cdiReceivedMessageDecoder: CdiReceivedMessageDecoder?, modifier
       )
       Text(
         text = "Timing angle",
-        color = Color.Green,
+        color = gaugeColors.terminalHeader,
         fontFamily = FontFamily.Monospace,
         fontWeight = FontWeight.Bold,
         fontSize = 12.sp,
@@ -96,7 +99,7 @@ fun TerminalView(cdiReceivedMessageDecoder: CdiReceivedMessageDecoder?, modifier
       )
     }
 
-    Divider(color = Color.Green, thickness = 1.dp)
+    HorizontalDivider(color = gaugeColors.terminalDivider, thickness = 1.dp)
 
     // Data rows
     LazyColumn(
@@ -112,6 +115,8 @@ fun TerminalView(cdiReceivedMessageDecoder: CdiReceivedMessageDecoder?, modifier
 
 @Composable
 fun CdiDataRow(entry: CdiLogEntry) {
+  val gaugeColors = LocalGaugeColors.current
+  
   Row(
     modifier = Modifier
       .fillMaxWidth()
@@ -120,7 +125,7 @@ fun CdiDataRow(entry: CdiLogEntry) {
   ) {
     Text(
       text = entry.timestamp,
-      color = Color.Green,
+      color = gaugeColors.terminalText,
       fontFamily = FontFamily.Monospace,
       fontSize = 11.sp,
       modifier = Modifier.weight(0.15f)
@@ -129,21 +134,21 @@ fun CdiDataRow(entry: CdiLogEntry) {
     entry.data?.let { data ->
       Text(
         text = String.format("%4d", data.rpm),
-        color = Color.Green,
+        color = gaugeColors.terminalText,
         fontFamily = FontFamily.Monospace,
         fontSize = 11.sp,
         modifier = Modifier.weight(0.15f)
       )
       Text(
         text = String.format("%.1fV", data.cdiVoltage),
-        color = Color.Green,
+        color = gaugeColors.terminalText,
         fontFamily = FontFamily.Monospace,
         fontSize = 11.sp,
         modifier = Modifier.weight(0.2f)
       )
       Text(
         text = String.format("%.1f", data.timingAngle),
-        color = Color.Green,
+        color = gaugeColors.terminalText,
         fontFamily = FontFamily.Monospace,
         fontSize = 11.sp,
         modifier = Modifier.weight(0.25f)
@@ -151,7 +156,7 @@ fun CdiDataRow(entry: CdiLogEntry) {
     } ?: run {
       Text(
         text = "---",
-        color = Color.Red,
+        color = gaugeColors.danger,
         fontFamily = FontFamily.Monospace,
         fontSize = 11.sp,
         modifier = Modifier.weight(0.85f)

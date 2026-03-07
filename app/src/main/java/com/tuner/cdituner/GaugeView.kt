@@ -2,7 +2,6 @@ package com.tuner.cdituner
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -17,12 +16,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.tuner.cdituner.ui.theme.LocalGaugeColors
 import kotlin.math.cos
 import kotlin.math.sin
 
 /**
  * A circular gauge composable that displays a value with an arc indicator.
  * Designed for motorcycle dashboard display - easy to read while riding.
+ * Uses theme colors from LocalGaugeColors for day/night mode support.
  */
 @Composable
 fun GaugeView(
@@ -33,19 +34,22 @@ fun GaugeView(
   unit: String,
   modifier: Modifier = Modifier,
   size: Dp = 200.dp,
-  arcColor: Color = Color(0xFF00FF00), // Bright green for visibility
-  backgroundColor: Color = Color(0xFF1A1A1A),
+  arcColor: Color? = null, // If null, uses theme default
   warningThreshold: Float? = null,
   dangerThreshold: Float? = null,
   decimalPlaces: Int = 0
 ) {
+  val gaugeColors = LocalGaugeColors.current
   val normalizedValue = ((value - minValue) / (maxValue - minValue)).coerceIn(0f, 1f)
+  
+  // Use provided color or default from theme
+  val baseArcColor = arcColor ?: gaugeColors.rpmArc
   
   // Determine arc color based on thresholds
   val currentArcColor = when {
-    dangerThreshold != null && value >= dangerThreshold -> Color(0xFFFF0000) // Red
-    warningThreshold != null && value >= warningThreshold -> Color(0xFFFFAA00) // Orange
-    else -> arcColor
+    dangerThreshold != null && value >= dangerThreshold -> gaugeColors.danger
+    warningThreshold != null && value >= warningThreshold -> gaugeColors.warning
+    else -> baseArcColor
   }
 
   Box(
@@ -66,7 +70,7 @@ fun GaugeView(
       
       // Draw background arc
       drawArc(
-        color = Color(0xFF333333),
+        color = gaugeColors.arcBackground,
         startAngle = startAngle,
         sweepAngle = sweepAngle,
         useCenter = false,
@@ -107,7 +111,7 @@ fun GaugeView(
         )
         
         drawLine(
-          color = Color(0xFF666666),
+          color = gaugeColors.tickColor,
           start = startPoint,
           end = endPoint,
           strokeWidth = 2f
@@ -127,7 +131,7 @@ fun GaugeView(
         } else {
           String.format("%.${decimalPlaces}f", value)
         },
-        color = Color.White,
+        color = gaugeColors.valueText,
         fontSize = (size.value * 0.2f).sp,
         fontWeight = FontWeight.Bold,
         textAlign = TextAlign.Center
@@ -136,7 +140,7 @@ fun GaugeView(
       // Unit
       Text(
         text = unit,
-        color = Color(0xFFAAAAAA),
+        color = gaugeColors.unitText,
         fontSize = (size.value * 0.1f).sp,
         textAlign = TextAlign.Center
       )
@@ -144,7 +148,7 @@ fun GaugeView(
       // Label
       Text(
         text = label,
-        color = Color(0xFF888888),
+        color = gaugeColors.labelText,
         fontSize = (size.value * 0.08f).sp,
         textAlign = TextAlign.Center
       )
@@ -154,6 +158,7 @@ fun GaugeView(
 
 /**
  * A smaller, simpler gauge for secondary values like voltage and timing.
+ * Uses theme colors from LocalGaugeColors for day/night mode support.
  */
 @Composable
 fun SmallGaugeView(
@@ -163,18 +168,22 @@ fun SmallGaugeView(
   label: String,
   unit: String,
   modifier: Modifier = Modifier,
-  arcColor: Color = Color(0xFF00AAFF),
+  arcColor: Color? = null, // If null, uses theme default
   warningLow: Float? = null,
   warningHigh: Float? = null,
   decimalPlaces: Int = 1
 ) {
+  val gaugeColors = LocalGaugeColors.current
   val normalizedValue = ((value - minValue) / (maxValue - minValue)).coerceIn(0f, 1f)
+  
+  // Use provided color or default from theme
+  val baseColor = arcColor ?: gaugeColors.voltageArc
   
   // Determine color based on thresholds
   val currentColor = when {
-    warningLow != null && value < warningLow -> Color(0xFFFF6600) // Orange for low
-    warningHigh != null && value > warningHigh -> Color(0xFFFF0000) // Red for high
-    else -> arcColor
+    warningLow != null && value < warningLow -> gaugeColors.lowWarning
+    warningHigh != null && value > warningHigh -> gaugeColors.danger
+    else -> baseColor
   }
 
   Column(
@@ -198,7 +207,7 @@ fun SmallGaugeView(
         
         // Background arc
         drawArc(
-          color = Color(0xFF333333),
+          color = gaugeColors.arcBackground,
           startAngle = startAngle,
           sweepAngle = sweepAngle,
           useCenter = false,
@@ -224,13 +233,13 @@ fun SmallGaugeView(
       ) {
         Text(
           text = String.format("%.${decimalPlaces}f", value),
-          color = Color.White,
+          color = gaugeColors.valueText,
           fontSize = 24.sp,
           fontWeight = FontWeight.Bold
         )
         Text(
           text = unit,
-          color = Color(0xFFAAAAAA),
+          color = gaugeColors.unitText,
           fontSize = 12.sp
         )
       }
@@ -238,7 +247,7 @@ fun SmallGaugeView(
     
     Text(
       text = label,
-      color = Color(0xFF888888),
+      color = gaugeColors.labelText,
       fontSize = 14.sp,
       modifier = Modifier.padding(top = 4.dp)
     )
