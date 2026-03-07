@@ -18,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import com.tuner.cdituner.ui.theme.CDITunerTheme
 
 class MainActivity : ComponentActivity() {
 
@@ -56,7 +57,7 @@ class MainActivity : ComponentActivity() {
     }
 
     setContent {
-      MaterialTheme {
+      CDITunerTheme {
         Surface(
           modifier = Modifier.fillMaxSize(),
           color = MaterialTheme.colorScheme.background
@@ -100,6 +101,9 @@ class MainActivity : ComponentActivity() {
     val connectionType by connectionManager.connectionType.collectAsState()
     val connectionStatus by connectionManager.connectionStatus.collectAsState()
     val cdiData by connectionManager.receivedData.collectAsState()
+    
+    // Tab state - 0 = Gauges, 1 = Logging
+    var selectedTab by remember { mutableIntStateOf(0) }
 
     Column(
       modifier = Modifier.fillMaxSize()
@@ -187,33 +191,61 @@ class MainActivity : ComponentActivity() {
         }
       }
 
-      Spacer(modifier = Modifier.height(8.dp))
+      // Tab Row for switching between Gauges and Logging
+      TabRow(
+        selectedTabIndex = selectedTab,
+        modifier = Modifier.fillMaxWidth(),
+        containerColor = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.primary
+      ) {
+        Tab(
+          selected = selectedTab == 0,
+          onClick = { selectedTab = 0 },
+          text = { Text("⏱ Gauges") }
+        )
+        Tab(
+          selected = selectedTab == 1,
+          onClick = { selectedTab = 1 },
+          text = { Text("📋 Logging") }
+        )
+      }
 
-      // CDI Data Display - Full width without card
-      Column(
+      // Content area based on selected tab
+      Box(
         modifier = Modifier
           .fillMaxWidth()
           .weight(1f)
       ) {
-        // Terminal View - Full width
-        if (cdiData != null) {
-          TerminalView(
-            cdiReceivedMessageDecoder = cdiData,
-            modifier = Modifier.fillMaxSize()
-          )
-        } else {
-          Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
-          ) {
-            Text(
-              text = when (connectionType) {
-                ConnectionManager.ConnectionType.NONE -> "Not connected"
-                else -> "Waiting for CDI..."
-              },
-              style = MaterialTheme.typography.bodyLarge,
-              color = MaterialTheme.colorScheme.onSurfaceVariant
+        when (selectedTab) {
+          0 -> {
+            // Gauges Screen
+            GaugesScreen(
+              cdiData = cdiData,
+              modifier = Modifier.fillMaxSize()
             )
+          }
+          1 -> {
+            // Logging Screen (Terminal View)
+            if (cdiData != null) {
+              TerminalView(
+                cdiReceivedMessageDecoder = cdiData,
+                modifier = Modifier.fillMaxSize()
+              )
+            } else {
+              Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+              ) {
+                Text(
+                  text = when (connectionType) {
+                    ConnectionManager.ConnectionType.NONE -> "Not connected"
+                    else -> "Waiting for CDI..."
+                  },
+                  style = MaterialTheme.typography.bodyLarge,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+              }
+            }
           }
         }
       }
