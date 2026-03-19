@@ -18,6 +18,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.io.IOException
+import android.util.Log
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
@@ -33,6 +34,12 @@ class UsbConnection : Service() {
 
   private val _connectionStatus = MutableStateFlow("Disconnected")
   val connectionStatus = _connectionStatus.asStateFlow()
+
+  private val _timingMap = MutableStateFlow<List<TimingPoint>?>(null)
+  val timingMap = _timingMap.asStateFlow()
+
+  private val _timingMapStatus = MutableStateFlow<String?>(null)
+  val timingMapStatus = _timingMapStatus.asStateFlow()
 
   private val job = SupervisorJob()
   private val scope = CoroutineScope(Dispatchers.IO + job)
@@ -194,6 +201,105 @@ class UsbConnection : Service() {
           disconnect()
           break
         }
+      }
+    }
+  }
+
+  /**
+   * Reads the ignition timing map from CDI.
+   * This pauses the normal data monitoring during the read operation.
+   * 
+   * Protocol:
+   * 1. Send initial request
+   * 2. Read page 0, send acknowledgment
+   * 3. Read page 1, send acknowledgment
+   * 4. Parse and return timing map data
+   */
+  fun readTimingMap() {
+    scope.launch {
+      // Pause normal data monitoring
+      readingJob?.cancel()
+      
+      _timingMapStatus.value = "Reading timing map..."
+
+      try {
+        val timingMapBytes = ByteArray(CdiTimingMapProtocol.USEFUL_DATA_SIZE * CdiTimingMapProtocol.PAGES_TO_READ)
+
+        var requestMessage = CdiTimingMapProtocol.READ_TIMING_MAP_REQUEST // Message content will get updated in the loop
+        
+        // Read pages
+        for (pageNum in 0 until CdiTimingMapProtocol.PAGES_TO_READ) {
+
+          // Send read timing map request
+          serialPort?.write(requestMessage, 1000)
+
+          _timingMapStatus.value = "Reading page ${pageNum + 1}/${CdiTimingMapProtocol.PAGES_TO_READ}..."
+
+          // Read page response
+          val pageBuffer = ByteArray(CdiTimingMapProtocol.PAGE_SIZE)
+          var totalNumberOfReadBytes = serialPort?.read(pageBuffer, 500)
+          var attempts = 0
+          val maxAttempts = 10
+
+          // First let's try to receive a message in a proper format.
+          // Retry send request for ignition table if received message doesn't match the pattern
+          while (pageBuffer[0] != 0x02.toByte() || pageBuffer[1] != 0x07.toByte() || totalNumberOfReadBytes == 0) {
+            // Request new reading
+            serialPort?.write(requestMessage, 1000)
+            // in the meantime print last reading
+            Log.d("UsbConnection", "Incorrect response. pageBuffer: ${pageBuffer.joinToString(" ") { "%02X".format(it) }}")
+            // Retry reading
+            totalNumberOfReadBytes = serialPort?.read(pageBuffer, 500)
+            Log.d("UsbConnection", "Bytes read: $totalNumberOfReadBytes")
+          }
+          Log.d("UsbConnection", "response after first read: ${pageBuffer.joinToString(" ") { "%02X".format(it) }}")
+//          System.arraycopy(pageBuffer, 0, wholeSinglePage, 0, totalNumberOfReadBytes ?: 0)
+          Log.d("UsbConnection", "Bytes read: $totalNumberOfReadBytes")
+
+          // Page may arrive incomplete (less than 64 bytes). Retrieve the rest of the message by retrying reading without sending any new request messages to CDI.
+          // We are reading an entire message chunk by chunk. Size of chunk is in 'tempNumberOfBytesRead' in bytes
+          while ((totalNumberOfReadBytes ?: 0) < CdiTimingMapProtocol.PAGE_SIZE && attempts < maxAttempts) {
+            Log.d("UsbConnection", "Incomplete response. Retrieving the rest of the message.")
+            val chunkContent = ByteArray(CdiTimingMapProtocol.PAGE_SIZE)
+
+            // Read new chunk of data (in bytes)
+            val chunkSize = serialPort?.read(chunkContent, 500) ?: 0
+            Log.d("UsbConnection", "Read result: ${chunkContent.joinToString(" ") { "%02X".format(it) }}")
+            Log.d("UsbConnection", "Number of bytes read in this loop: $chunkSize")
+
+            // Put newly read bytes into the large array
+            System.arraycopy(chunkContent, 0, pageBuffer, totalNumberOfReadBytes ?: 0, chunkSize ?: 0)
+
+            // New bytes arrived so we update total number of bytes read
+            totalNumberOfReadBytes = totalNumberOfReadBytes?.plus(chunkSize)
+            Log.d("UsbConnection", "Number of bytes read so far: $totalNumberOfReadBytes")
+            Log.d("UsbConnection", "Message so far: ${pageBuffer.joinToString(" ") { "%02X".format(it) }}")
+
+            attempts++
+          }
+
+          Log.d("UsbConnection", "This reading should be correct. pageBuffer: ${pageBuffer.joinToString(" ") { "%02X".format(it) }}")
+          // Load page without header (first 4 bytes) and footer (last 2 bytes) to timing map array
+          System.arraycopy(pageBuffer, 4, timingMapBytes, pageNum * CdiTimingMapProtocol.USEFUL_DATA_SIZE, CdiTimingMapProtocol.USEFUL_DATA_SIZE)
+
+          // Set a message request to retrieve next page
+          requestMessage = CdiTimingMapProtocol.createAcknowledgeMessage(pageBuffer)
+          Log.d("UsbConnection", "Pages content so far: ${timingMapBytes.joinToString(" ") { "%02X".format(it) }}")
+          }
+
+        // Parse the timing map
+        val timingMap = CdiTimingMapProtocol.parseTimingMap(timingMapBytes)
+        if (timingMap != null) {
+          _timingMap.value = timingMap
+          _timingMapStatus.value = "Timing map loaded (${timingMap.size} points)"
+        } else {
+          _timingMapStatus.value = "Failed to parse timing map"
+        }
+        
+      } catch (e: IOException) {
+        _timingMapStatus.value = "Error reading timing map: ${e.message}"
+      } finally {
+        startDataMonitor()
       }
     }
   }

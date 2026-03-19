@@ -43,6 +43,12 @@ class ConnectionManager(private val context: Context) {
   private val _receivedData = MutableStateFlow<CdiReceivedMessageDecoder?>(null)
   val receivedData: StateFlow<CdiReceivedMessageDecoder?> = _receivedData.asStateFlow()
 
+  private val _timingMap = MutableStateFlow<List<TimingPoint>?>(null)
+  val timingMap: StateFlow<List<TimingPoint>?> = _timingMap.asStateFlow()
+
+  private val _timingMapStatus = MutableStateFlow<String?>(null)
+  val timingMapStatus: StateFlow<String?> = _timingMapStatus.asStateFlow()
+
   private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
   private var usbObserverJob: Job? = null
   private var bluetoothObserverJob: Job? = null
@@ -209,6 +215,40 @@ class ConnectionManager(private val context: Context) {
   fun getLastBluetoothName(): String? = preferences.getLastBluetoothName()
 
   /**
+   * Read the timing map from CDI.
+   * Only reads if not already loaded (cached).
+   * Call this when user opens the Timing tab.
+   */
+  fun readTimingMapIfNeeded() {
+    // Only read if we don't already have a timing map cached
+    if (_timingMap.value != null) {
+      return  // Already loaded, keep the cached version
+    }
+    
+    when (currentConnectionType) {
+      ConnectionType.USB -> {
+        usbConnection?.readTimingMap()
+      }
+      ConnectionType.BLUETOOTH -> {
+        // TODO: Implement for Bluetooth when needed
+        _timingMapStatus.value = "Timing map reading not yet supported over Bluetooth"
+      }
+      ConnectionType.NONE -> {
+        _timingMapStatus.value = "Not connected to CDI"
+      }
+    }
+  }
+
+  /**
+   * Force refresh the timing map from CDI.
+   * Reads even if already cached.
+   */
+  fun refreshTimingMap() {
+    _timingMap.value = null  // Clear cache
+    readTimingMapIfNeeded()
+  }
+
+  /**
    * Disconnect current connection
    */
   fun disconnect() {
@@ -278,6 +318,20 @@ class ConnectionManager(private val context: Context) {
         launch {
           service.receivedData.collect { data ->
             _receivedData.value = data
+          }
+        }
+
+        // Observe timing map data
+        launch {
+          service.timingMap.collect { data ->
+            _timingMap.value = data
+          }
+        }
+
+        // Observe timing map status
+        launch {
+          service.timingMapStatus.collect { status ->
+            _timingMapStatus.value = status
           }
         }
       }

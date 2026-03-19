@@ -101,9 +101,18 @@ class MainActivity : ComponentActivity() {
     val connectionType by connectionManager.connectionType.collectAsState()
     val connectionStatus by connectionManager.connectionStatus.collectAsState()
     val cdiData by connectionManager.receivedData.collectAsState()
+    val timingMap by connectionManager.timingMap.collectAsState()
+    val timingMapStatus by connectionManager.timingMapStatus.collectAsState()
     
-    // Tab state - 0 = Gauges, 1 = Logging
+    // Tab state - 0 = Gauges, 1 = Timing, 2 = Logging
     var selectedTab by remember { mutableIntStateOf(0) }
+    
+    // Trigger timing map read when Timing tab is selected
+    LaunchedEffect(selectedTab) {
+      if (selectedTab == 1) {
+        connectionManager.readTimingMapIfNeeded()
+      }
+    }
 
     Column(
       modifier = Modifier.fillMaxSize()
@@ -191,7 +200,7 @@ class MainActivity : ComponentActivity() {
         }
       }
 
-      // Tab Row for switching between Gauges and Logging
+      // Tab Row for switching between Gauges, Timing, and Logging
       TabRow(
         selectedTabIndex = selectedTab,
         modifier = Modifier.fillMaxWidth(),
@@ -206,6 +215,11 @@ class MainActivity : ComponentActivity() {
         Tab(
           selected = selectedTab == 1,
           onClick = { selectedTab = 1 },
+          text = { Text("📈 Timing") }
+        )
+        Tab(
+          selected = selectedTab == 2,
+          onClick = { selectedTab = 2 },
           text = { Text("📋 Logging") }
         )
       }
@@ -225,6 +239,15 @@ class MainActivity : ComponentActivity() {
             )
           }
           1 -> {
+            // Timing Curve Screen
+            TimingScreen(
+              timingMap = timingMap,
+              statusMessage = timingMapStatus,
+              onRefresh = { connectionManager.refreshTimingMap() },
+              modifier = Modifier.fillMaxSize()
+            )
+          }
+          2 -> {
             // Logging Screen (Terminal View)
             if (cdiData != null) {
               TerminalView(
