@@ -220,6 +220,9 @@ class UsbConnection : Service() {
       // Pause normal data monitoring
       readingJob?.cancel()
       
+      // Clear cached timing map to ensure StateFlow emits the new value
+      // (StateFlow uses structural equality, so identical data wouldn't be re-emitted)
+      _timingMap.value = null
       _timingMapStatus.value = "Reading timing map..."
 
       try {
