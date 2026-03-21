@@ -113,12 +113,12 @@ fun TimingScreen(
       }
     } else if (timingMap != null && timingMap.isNotEmpty()) {
       // Data loaded - show graph and table
+      // Graph spans full width (no horizontal padding) for better readability
       TimingCurveGraph(
         timingCurve = timingMap,
         modifier = Modifier
           .fillMaxWidth()
           .height(300.dp)
-          .padding(8.dp)
       )
 
       Spacer(modifier = Modifier.height(24.dp))
@@ -197,10 +197,10 @@ fun TimingCurveGraph(
   val maxTiming = 50f
 
   Canvas(modifier = modifier) {
-    val chartLeft = 60.dp.toPx()
-    val chartRight = size.width - 20.dp.toPx()
-    val chartTop = 20.dp.toPx()
-    val chartBottom = size.height - 40.dp.toPx()
+    val chartLeft = 8.dp.toPx()
+    val chartRight = size.width // - 8.dp.toPx()
+    val chartTop = 16.dp.toPx()
+    val chartBottom = size.height - 36.dp.toPx()
     val chartWidth = chartRight - chartLeft
     val chartHeight = chartBottom - chartTop
 
