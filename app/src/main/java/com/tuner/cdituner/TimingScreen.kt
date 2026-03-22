@@ -15,9 +15,11 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
@@ -59,6 +61,18 @@ data class TimingPoint(
 }
 
 /**
+ * Helper data class to store chart dimensions for coordinate conversion.
+ */
+private data class ChartDimensions(
+  val chartLeft: Float,
+  val chartRight: Float,
+  val chartTop: Float,
+  val chartBottom: Float,
+  val chartWidth: Float,
+  val chartHeight: Float
+)
+
+/**
  * Timing curve screen that displays the ignition map as a graph.
  * Shows RPM on X-axis and Timing Angle (degrees BTDC) on Y-axis.
  * The CDI supports 16 timing points from 1000 to 16000 RPM.
@@ -68,6 +82,7 @@ data class TimingPoint(
  * @param statusMessage Status message to display (loading, error, etc.)
  * @param onRefresh Callback to force refresh timing map from CDI
  * @param onPointClick Callback when a timing point is clicked (index, point)
+ * @param onPointDrag Callback when a timing point is dragged to new values (index, newRpm, newTimingRaw)
  */
 @Composable
 fun TimingScreen(
@@ -75,6 +90,7 @@ fun TimingScreen(
   statusMessage: String?,
   onRefresh: () -> Unit,
   onPointClick: (Int, TimingPoint) -> Unit = { _, _ -> },
+  onPointDrag: (Int, Int, Int) -> Unit = { _, _, _ -> },
   modifier: Modifier = Modifier
 ) {
   val gaugeColors = LocalGaugeColors.current
@@ -84,6 +100,17 @@ fun TimingScreen(
   
   // Track selected point index - shared between graph and table
   val selectedPointIndex = remember { mutableStateOf<Int?>(null) }
+  
+  // Local editable copy of timing map for immediate visual feedback during dragging
+  val editableTimingMap = remember { mutableStateOf<List<TimingPoint>?>(null) }
+  
+  // Sync editable map with source when source changes (e.g., after refresh)
+  LaunchedEffect(timingMap) {
+    editableTimingMap.value = timingMap?.toList()
+  }
+  
+  // The map to display - use editable copy if available, otherwise source
+  val displayMap = editableTimingMap.value ?: timingMap
 
   Column(
     modifier = modifier
@@ -136,17 +163,25 @@ fun TimingScreen(
           )
         }
       }
-    } else if (timingMap != null && timingMap.isNotEmpty()) {
+    } else if (displayMap != null && displayMap.isNotEmpty()) {
       // Data loaded - show graph and table
       // Graph spans full width (no horizontal padding) for better readability
       TimingCurveGraph(
-        timingCurve = timingMap,
+        timingCurve = displayMap,
         selectedIndex = selectedPointIndex.value,
         onPointClick = { index, point ->
           selectedPointIndex.value = index
           onPointClick(index, point)
         },
         onDeselect = { selectedPointIndex.value = null },
+        onPointDrag = { index, newRpm, newTimingRaw ->
+          // Update local editable map for immediate visual feedback
+          editableTimingMap.value = editableTimingMap.value?.toMutableList()?.apply {
+            this[index] = TimingPoint(newRpm, newTimingRaw)
+          }
+          // Also notify parent (for potential saving to CDI later)
+          onPointDrag(index, newRpm, newTimingRaw)
+        },
         modifier = Modifier
           .fillMaxWidth()
           .height(300.dp)
@@ -164,7 +199,7 @@ fun TimingScreen(
       )
 
       TimingTable(
-        timingCurve = timingMap,
+        timingCurve = displayMap,
         selectedIndex = selectedPointIndex.value,
         modifier = Modifier.fillMaxWidth()
       )
@@ -211,12 +246,14 @@ fun TimingScreen(
 /**
  * Composable that draws the timing curve as a line graph.
  * Points are clickable - tap on a point to select it.
+ * Selected points can be dragged up/down (timing) and left/right (RPM) within bounds.
  * Supports horizontal zoom (pinch) and pan (drag) on X-axis.
  *
  * @param timingCurve List of timing points to display
  * @param selectedIndex Currently selected point index (null if none)
  * @param onPointClick Callback when a point is clicked (index, point)
  * @param onDeselect Callback when user taps outside any point
+ * @param onPointDrag Callback when a point is dragged to new values (index, newRpm, newTimingRaw)
  * @param modifier Modifier for the canvas
  */
 @Preview
@@ -226,6 +263,7 @@ fun TimingCurveGraph(
   selectedIndex: Int? = null,
   onPointClick: (Int, TimingPoint) -> Unit = { _, _ -> },
   onDeselect: () -> Unit = {},
+  onPointDrag: (Int, Int, Int) -> Unit = { _, _, _ -> },
   modifier: Modifier = Modifier
 ) {
   val gaugeColors = LocalGaugeColors.current
@@ -248,18 +286,50 @@ fun TimingCurveGraph(
   val zoomX = remember { mutableFloatStateOf(1f) }
   // panX: offset in RPM units (0 = start at 0 RPM)
   val panX = remember { mutableFloatStateOf(0f) }
+  
+  // Store chart dimensions for coordinate conversion in gesture handler
+  val chartDimensions = remember { mutableStateOf<ChartDimensions?>(null) }
+  
+  // Use rememberUpdatedState to access latest values inside gesture handler without restarting it
+  val currentTimingCurve = rememberUpdatedState(timingCurve)
+  val currentSelectedIndex = rememberUpdatedState(selectedIndex)
+  val currentOnPointDrag = rememberUpdatedState(onPointDrag)
+  val currentOnPointClick = rememberUpdatedState(onPointClick)
+  val currentOnDeselect = rememberUpdatedState(onDeselect)
 
   Canvas(
     modifier = modifier
       .clipToBounds()
-      // Combined gesture handler for tap, zoom, and pan
-      .pointerInput(timingCurve) {
+      // Combined gesture handler for tap, zoom, pan, and point dragging
+      // Use Unit as key so it doesn't restart when timingCurve changes during drag
+      .pointerInput(Unit) {
         awaitEachGesture {
           val firstDown = awaitFirstDown(requireUnconsumed = false)
           val startPosition = firstDown.position
           var totalDragDistance = 0f
           var isMultiTouch = false
           var hasMoved = false
+          var isDraggingPoint = false
+          var draggedPointIndex = -1
+          
+          // Check if we're starting a drag on the selected point
+          // Use currentSelectedIndex.value to get latest value
+          val selIdx = currentSelectedIndex.value
+          if (selIdx != null) {
+            val positions = pointPositions.value
+            if (selIdx < positions.size) {
+              val selectedPointPos = positions[selIdx]
+              val touchRadius = 30.dp.toPx() // Slightly larger touch area for dragging
+              val distance = kotlin.math.sqrt(
+                (startPosition.x - selectedPointPos.x) * (startPosition.x - selectedPointPos.x) +
+                (startPosition.y - selectedPointPos.y) * (startPosition.y - selectedPointPos.y)
+              )
+              if (distance <= touchRadius) {
+                isDraggingPoint = true
+                draggedPointIndex = selIdx
+              }
+            }
+          }
           
           do {
             val event = awaitPointerEvent()
@@ -268,6 +338,7 @@ fun TimingCurveGraph(
             // Check if this is a multi-touch gesture (pinch zoom)
             if (pointerCount >= 2) {
               isMultiTouch = true
+              isDraggingPoint = false // Cancel point drag on multi-touch
               val zoom = event.calculateZoom()
               val centroid = event.calculateCentroid(useCurrent = true)
               
@@ -290,25 +361,66 @@ fun TimingCurveGraph(
               
               event.changes.forEach { it.consume() }
             } else if (pointerCount == 1) {
-              // Single finger - could be tap or pan
               val change = event.changes.first()
               if (change.positionChanged()) {
                 val dragX = change.position.x - change.previousPosition.x
-                totalDragDistance += kotlin.math.abs(dragX)
+                val dragY = change.position.y - change.previousPosition.y
+                totalDragDistance += kotlin.math.sqrt(dragX * dragX + dragY * dragY)
                 
-                // Only pan if we've moved enough (prevents accidental pan on tap)
+                // Only process movement if we've moved enough (prevents accidental moves on tap)
                 if (totalDragDistance > 8.dp.toPx()) {
                   hasMoved = true
-                  val chartLeft = 8.dp.toPx()  // Must match drawing code
-                  val chartWidth = size.width - chartLeft - 8.dp.toPx()
-                  val visibleRpmRange = maxRpm / zoomX.floatValue
-                  val rpmPerPixel = visibleRpmRange / chartWidth
                   
-                  // Pan in opposite direction of drag
-                  val newPanX = panX.floatValue - dragX * rpmPerPixel
-                  panX.floatValue = newPanX.coerceIn(0f, maxRpm - visibleRpmRange)
-                  
-                  change.consume()
+                  if (isDraggingPoint && draggedPointIndex >= 0) {
+                    // Dragging a selected point - convert position to RPM and timing values
+                    val dims = chartDimensions.value
+                    val curve = currentTimingCurve.value
+                    if (dims != null && curve.isNotEmpty()) {
+                      val currentPos = change.position
+                      
+                      // Convert pixel position to RPM and timing values
+                      val visibleRpmRange = maxRpm / zoomX.floatValue
+                      val minVisibleRpm = panX.floatValue
+                      
+                      // Calculate new RPM from X position
+                      val newRpm = minVisibleRpm + ((currentPos.x - dims.chartLeft) / dims.chartWidth) * visibleRpmRange
+                      
+                      // Calculate new timing from Y position (inverted - top is higher timing)
+                      val newTiming = ((dims.chartBottom - currentPos.y) / dims.chartHeight) * maxTiming
+                      
+                      // Calculate bounds based on neighboring points (use latest curve data)
+                      val minRpm = if (draggedPointIndex > 0) {
+                        curve[draggedPointIndex - 1].rpm + 100 // At least 100 RPM gap
+                      } else {
+                        500 // Minimum RPM
+                      }
+                      val maxRpmBound = if (draggedPointIndex < curve.size - 1) {
+                        curve[draggedPointIndex + 1].rpm - 100 // At least 100 RPM gap
+                      } else {
+                        16000 // Maximum RPM
+                      }
+                      
+                      // Clamp values within bounds
+                      val clampedRpm = newRpm.toInt().coerceIn(minRpm, maxRpmBound)
+                      val clampedTiming = (newTiming * 100).toInt().coerceIn(0, 5000) // 0-50 degrees as raw value
+                      
+                      // Notify parent of the drag (use latest callback)
+                      currentOnPointDrag.value(draggedPointIndex, clampedRpm, clampedTiming)
+                    }
+                    change.consume()
+                  } else {
+                    // Not dragging a point - pan the chart
+                    val chartLeft = 8.dp.toPx()  // Must match drawing code
+                    val chartWidth = size.width - chartLeft - 8.dp.toPx()
+                    val visibleRpmRange = maxRpm / zoomX.floatValue
+                    val rpmPerPixel = visibleRpmRange / chartWidth
+                    
+                    // Pan in opposite direction of drag
+                    val newPanX = panX.floatValue - dragX * rpmPerPixel
+                    panX.floatValue = newPanX.coerceIn(0f, maxRpm - visibleRpmRange)
+                    
+                    change.consume()
+                  }
                 }
               }
             }
@@ -318,23 +430,24 @@ fun TimingCurveGraph(
           if (!hasMoved && !isMultiTouch) {
             val touchRadius = 24.dp.toPx()
             val positions = pointPositions.value
+            val curve = currentTimingCurve.value
             var pointClicked = false
             
             positions.forEachIndexed { index, pointOffset ->
-              if (!pointClicked) {
+              if (!pointClicked && index < curve.size) {
                 val distance = kotlin.math.sqrt(
                   (startPosition.x - pointOffset.x) * (startPosition.x - pointOffset.x) +
                   (startPosition.y - pointOffset.y) * (startPosition.y - pointOffset.y)
                 )
                 if (distance <= touchRadius) {
-                  onPointClick(index, timingCurve[index])
+                  currentOnPointClick.value(index, curve[index])
                   pointClicked = true
                 }
               }
             }
             // Tap was not on any point - deselect
             if (!pointClicked) {
-              onDeselect()
+              currentOnDeselect.value()
             }
           }
         }
@@ -346,6 +459,16 @@ fun TimingCurveGraph(
     val chartBottom = size.height - 36.dp.toPx()
     val chartWidth = chartRight - chartLeft
     val chartHeight = chartBottom - chartTop
+    
+    // Store chart dimensions for gesture handler to use
+    chartDimensions.value = ChartDimensions(
+      chartLeft = chartLeft,
+      chartRight = chartRight,
+      chartTop = chartTop,
+      chartBottom = chartBottom,
+      chartWidth = chartWidth,
+      chartHeight = chartHeight
+    )
     
     // Calculate visible RPM range based on zoom
     val visibleRpmRange = maxRpm / zoomX.floatValue
