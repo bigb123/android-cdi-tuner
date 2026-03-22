@@ -44,6 +44,38 @@ data class GaugeColors(
   val terminalDivider: Color
 )
 
+/**
+ * Data class holding colors for the ignition timing graph.
+ */
+data class GraphColors(
+  // Selection colors
+  val pointSelected: Color,        // Color for selected point circle
+  val tableSelectedBackground: Color, // Background for selected table row
+  
+  // Safe/Unsafe state colors (locked vs unlocked editing)
+  val safe: Color,                 // Green - locked, safe state
+  val unsafe: Color                // Red - unlocked, editable state
+)
+
+// Night/Dark theme graph colors
+val NightGraphColors = GraphColors(
+  pointSelected = Color(0xFFFFC107),      // Gold for selection
+  tableSelectedBackground = Color(0xFF4A4000), // Dark yellow for night mode
+  safe = SafeColorNight,
+  unsafe = UnsafeColorNight
+)
+
+// Day/Light theme graph colors
+val DayGraphColors = GraphColors(
+  pointSelected = Color(0xFF795B02),      // Brown for selection
+  tableSelectedBackground = Color(0xFFFFF5AB), // Light yellow for day mode
+  safe = SafeColorDay,
+  unsafe = UnsafeColorDay
+)
+
+// CompositionLocal for graph colors
+val LocalGraphColors = staticCompositionLocalOf { NightGraphColors }
+
 // Night/Dark theme gauge colors
 val NightGaugeColors = GaugeColors(
   gaugeBackground = GaugeBackgroundNight,
@@ -61,7 +93,7 @@ val NightGaugeColors = GaugeColors(
   terminalBackground = TerminalBackgroundNight,
   terminalText = TerminalTextNight,
   terminalHeader = TerminalHeaderNight,
-  terminalDivider = TerminalDividerNight
+  terminalDivider = TerminalDividerNight,
 )
 
 // Day/Light theme gauge colors
@@ -115,10 +147,14 @@ fun CDITunerTheme(
     else -> LightColorScheme
   }
   
-  // Select gauge colors based on system theme
+  // Select colors based on system theme
   val gaugeColors = if (darkTheme) NightGaugeColors else DayGaugeColors
+  val graphColors = if (darkTheme) NightGraphColors else DayGraphColors
 
-  CompositionLocalProvider(LocalGaugeColors provides gaugeColors) {
+  CompositionLocalProvider(
+    LocalGaugeColors provides gaugeColors,
+    LocalGraphColors provides graphColors
+  ) {
     MaterialTheme(
       colorScheme = colorScheme,
       typography = Typography,

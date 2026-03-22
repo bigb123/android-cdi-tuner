@@ -17,6 +17,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -39,13 +40,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tuner.cdituner.ui.theme.LocalGaugeColors
-
-/**
- * Colors
- */
-
-val SELECTED_COLOR = Color(0xFF4CAF50) // Green color for selection
-val SELECTED_COLOR_BACKGROUND = Color(0xFFFFF5AB) // Yellow color to highlight table selection
+import com.tuner.cdituner.ui.theme.LocalGraphColors
 
 /**
  * Data class representing a single point in the ignition timing curve.
@@ -100,6 +95,9 @@ fun TimingScreen(
   
   // Track selected point index - shared between graph and table
   val selectedPointIndex = remember { mutableStateOf<Int?>(null) }
+  
+  // Lock state - shared between graph and table (locked by default to prevent accidental timing changes)
+  val isLocked = remember { mutableStateOf(true) }
   
   // Local editable copy of timing map for immediate visual feedback during dragging
   val editableTimingMap = remember { mutableStateOf<List<TimingPoint>?>(null) }
@@ -169,6 +167,7 @@ fun TimingScreen(
       TimingCurveGraph(
         timingCurve = displayMap,
         selectedIndex = selectedPointIndex.value,
+        isLocked = isLocked,
         onPointClick = { index, point ->
           selectedPointIndex.value = index
           onPointClick(index, point)
@@ -201,6 +200,7 @@ fun TimingScreen(
       TimingTable(
         timingCurve = displayMap,
         selectedIndex = selectedPointIndex.value,
+        isLocked = isLocked.value,
         modifier = Modifier.fillMaxWidth()
       )
     } else {
@@ -262,15 +262,22 @@ fun TimingScreen(
 fun TimingCurveGraph(
   timingCurve: List<TimingPoint>,
   selectedIndex: Int? = null,
+  isLocked: MutableState<Boolean> = mutableStateOf(true),
   onPointClick: (Int, TimingPoint) -> Unit = { _, _ -> },
   onDeselect: () -> Unit = {},
   onPointDrag: (Int, Int, Int) -> Unit = { _, _, _ -> },
   modifier: Modifier = Modifier
 ) {
   val gaugeColors = LocalGaugeColors.current
+  val graphColors = LocalGraphColors.current
   val textMeasurer = rememberTextMeasurer()
   
-  val lineColor = gaugeColors.timingArc
+  // Helper function to get selection color based on lock state
+  fun selectionColor(locked: Boolean, alpha: Float = 1f): Color {
+    return if (locked) graphColors.safe.copy(alpha = alpha) else graphColors.unsafe.copy(alpha = alpha)
+  }
+  
+  val lineColor = selectionColor(isLocked.value)
   val gridColor = gaugeColors.labelText.copy(alpha = 0.2f)
   val axisColor = gaugeColors.labelText.copy(alpha = 0.6f)
   val textColor = gaugeColors.labelText
@@ -278,9 +285,6 @@ fun TimingCurveGraph(
   // Chart bounds - 16000 RPM max to accommodate all 16 points
   val maxRpm = 16000f
   val maxTiming = 50f
-  
-  // Lock state - locked by default to prevent accidental timing changes
-  val isLocked = remember { mutableStateOf(true) }
   
   // Store calculated point positions for hit testing
   val pointPositions = remember { mutableStateOf<List<Offset>>(emptyList()) }
@@ -603,7 +607,7 @@ fun TimingCurveGraph(
               
               // Outer circle (larger when selected)
               drawCircle(
-                color = if (isSelected) SELECTED_COLOR else lineColor,
+                color = if (isSelected) graphColors.pointSelected else lineColor,
                 radius = if (isSelected) 10.dp.toPx() else 6.dp.toPx(),
                 center = offset
               )
@@ -633,17 +637,23 @@ fun TimingCurveGraph(
     }
     
     // Padlock button overlay in top right corner (offset left to not obscure last graph point)
-    // Semi-transparent to not obstruct visibility
-    Text(
-      text = if (isLocked.value) "🔒" else "🔓",
-      fontSize = 24.sp,
+    // Green background when locked (safe), red background when unlocked (editable/danger)
+    Box(
       modifier = Modifier
         .align(Alignment.TopEnd)
         .padding(end = 48.dp, top = 8.dp)
+        .background(
+          color = selectionColor(isLocked.value, 0.4f),
+          shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+        )
         .clickable { isLocked.value = !isLocked.value }
-        .padding(4.dp),
-      color = if (isLocked.value) Color.Green.copy(alpha = 0.5f) else Color.Red.copy(alpha = 0.5f)
-    )
+        .padding(8.dp)
+    ) {
+      Text(
+        text = if (isLocked.value) "🔒" else "🔓",
+        fontSize = 28.sp
+      )
+    }
   }
 }
 
@@ -658,9 +668,16 @@ fun TimingCurveGraph(
 fun TimingTable(
   timingCurve: List<TimingPoint>,
   selectedIndex: Int? = null,
+  isLocked: Boolean = true,
   modifier: Modifier = Modifier
 ) {
   val gaugeColors = LocalGaugeColors.current
+  val graphColors = LocalGraphColors.current
+  
+  // Helper function to get selection color based on lock state
+  fun selectionColor(locked: Boolean, alpha: Float = 1f): Color {
+    return if (locked) graphColors.safe.copy(alpha = alpha) else graphColors.unsafe.copy(alpha = alpha)
+  }
 
   Column(modifier = modifier) {
     // Header row
@@ -695,7 +712,7 @@ fun TimingTable(
           .fillMaxWidth()
           .background(
             when {
-              isSelected -> SELECTED_COLOR_BACKGROUND
+              isSelected -> selectionColor(isLocked, 0.3f)
               index % 2 == 0 -> Color.Transparent
               else -> gaugeColors.labelText.copy(alpha = 0.05f)
             }
@@ -706,14 +723,14 @@ fun TimingTable(
         Text(
           text = "${point.rpm}",
           style = MaterialTheme.typography.bodyMedium,
-          color = if (isSelected) SELECTED_COLOR else gaugeColors.labelText,
+          color = if (isSelected) graphColors.pointSelected else gaugeColors.labelText,
           fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
           modifier = Modifier.weight(1f)
         )
         Text(
           text = String.format("%.2f°", point.timingDegrees),
           style = MaterialTheme.typography.bodyMedium,
-          color = if (isSelected) SELECTED_COLOR else gaugeColors.timingArc,
+          color = if (isSelected) graphColors.pointSelected else gaugeColors.timingArc,
           fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
           modifier = Modifier.weight(1f)
         )

@@ -40,6 +40,11 @@ val TerminalTextNight = Color(0xFF00FF00)  // Classic green terminal
 val TerminalHeaderNight = Color(0xFF00FF00)
 val TerminalDividerNight = Color(0xFF00FF00)
 
+// Ignition Timing graph
+
+val SafeColorNight = Color.Green
+val UnsafeColorNight = Color.Red
+
 // ============================================
 // CDI Tuner Gauge Colors - Day Theme (Light)
 // ============================================
@@ -68,3 +73,8 @@ val TerminalBackgroundDay = Color(0xFFF0F0F0)
 val TerminalTextDay = Color(0xFF006600)    // Dark green
 val TerminalHeaderDay = Color(0xFF004400)
 val TerminalDividerDay = Color(0xFF008800)
+
+// Ignition Timing graph
+
+val SafeColorDay = Color(0xFF006600)
+val UnsafeColorDay = Color.Red
