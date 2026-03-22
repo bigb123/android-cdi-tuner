@@ -445,7 +445,7 @@ fun TimingCurveGraph(
       clipRect(
         left = chartLeft,
         top = chartTop,
-        right = chartRight,
+        right = size.width,
         bottom = chartBottom
       ) {
         // Draw the curve line
