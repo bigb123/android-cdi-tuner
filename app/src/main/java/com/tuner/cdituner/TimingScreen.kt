@@ -33,9 +33,17 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tuner.cdituner.ui.theme.LocalGaugeColors
+
+/**
+ * Colors
+ */
+
+val SELECTED_COLOR = Color(0xFF4CAF50) // Green color for selection
+val SELECTED_COLOR_BACKGROUND = Color(0xFFFFEB3B) // Yellow color to highlight table selection
 
 /**
  * Data class representing a single point in the ignition timing curve.
@@ -211,6 +219,7 @@ fun TimingScreen(
  * @param onDeselect Callback when user taps outside any point
  * @param modifier Modifier for the canvas
  */
+@Preview
 @Composable
 fun TimingCurveGraph(
   timingCurve: List<TimingPoint>,
@@ -226,7 +235,6 @@ fun TimingCurveGraph(
   val gridColor = gaugeColors.labelText.copy(alpha = 0.2f)
   val axisColor = gaugeColors.labelText.copy(alpha = 0.6f)
   val textColor = gaugeColors.labelText
-  val selectedColor = Color(0xFFFFD700) // Gold color for selected point
   
   // Chart bounds - 16000 RPM max to accommodate all 16 points
   val maxRpm = 16000f
@@ -463,7 +471,7 @@ fun TimingCurveGraph(
             
             // Outer circle (larger when selected)
             drawCircle(
-              color = if (isSelected) selectedColor else lineColor,
+              color = if (isSelected) SELECTED_COLOR else lineColor,
               radius = if (isSelected) 10.dp.toPx() else 6.dp.toPx(),
               center = offset
             )
@@ -477,7 +485,7 @@ fun TimingCurveGraph(
         }
       }
     }
-    
+
     // Draw zoom indicator if zoomed in
     if (zoomX.floatValue > 1.01f) {
       val zoomText = "%.1fx".format(zoomX.floatValue)
@@ -507,8 +515,7 @@ fun TimingTable(
   modifier: Modifier = Modifier
 ) {
   val gaugeColors = LocalGaugeColors.current
-  val selectedColor = Color(0xFFFFD700) // Gold color for selected row
-  
+
   Column(modifier = modifier) {
     // Header row
     Row(
@@ -533,7 +540,7 @@ fun TimingTable(
         modifier = Modifier.weight(1f)
       )
     }
-    
+
     // Data rows
     timingCurve.forEachIndexed { index, point ->
       val isSelected = selectedIndex == index
@@ -542,7 +549,7 @@ fun TimingTable(
           .fillMaxWidth()
           .background(
             when {
-              isSelected -> selectedColor.copy(alpha = 0.3f)
+              isSelected -> SELECTED_COLOR_BACKGROUND.copy(alpha = 0.3f)
               index % 2 == 0 -> Color.Transparent
               else -> gaugeColors.labelText.copy(alpha = 0.05f)
             }
@@ -553,14 +560,14 @@ fun TimingTable(
         Text(
           text = "${point.rpm}",
           style = MaterialTheme.typography.bodyMedium,
-          color = if (isSelected) selectedColor else gaugeColors.labelText,
+          color = if (isSelected) SELECTED_COLOR else gaugeColors.labelText,
           fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
           modifier = Modifier.weight(1f)
         )
         Text(
           text = String.format("%.2f°", point.timingDegrees),
           style = MaterialTheme.typography.bodyMedium,
-          color = if (isSelected) selectedColor else gaugeColors.timingArc,
+          color = if (isSelected) SELECTED_COLOR else gaugeColors.timingArc,
           fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
           modifier = Modifier.weight(1f)
         )
