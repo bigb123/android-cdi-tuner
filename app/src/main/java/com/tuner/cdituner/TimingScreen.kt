@@ -102,9 +102,14 @@ fun TimingScreen(
   // Local editable copy of timing map for immediate visual feedback during dragging
   val editableTimingMap = remember { mutableStateOf<List<TimingPoint>?>(null) }
   
+  // History stack for undo functionality - stores previous states of the timing map
+  val timingMapHistory = remember { mutableStateOf<List<List<TimingPoint>>>(emptyList()) }
+  
   // Sync editable map with source when source changes (e.g., after refresh)
+  // Also clear history when a fresh map is loaded from CDI
   LaunchedEffect(timingMap) {
     editableTimingMap.value = timingMap?.toList()
+    timingMapHistory.value = emptyList()
   }
   
   // The map to display - use editable copy if available, otherwise source
@@ -168,11 +173,27 @@ fun TimingScreen(
         timingCurve = displayMap,
         selectedIndex = selectedPointIndex.value,
         isLocked = isLocked,
+        canUndo = timingMapHistory.value.isNotEmpty(),
+        onUndo = {
+          // Pop the last state from history and restore it
+          val history = timingMapHistory.value
+          if (history.isNotEmpty()) {
+            val previousState = history.last()
+            timingMapHistory.value = history.dropLast(1)
+            editableTimingMap.value = previousState
+          }
+        },
         onPointClick = { index, point ->
           selectedPointIndex.value = index
           onPointClick(index, point)
         },
         onDeselect = { selectedPointIndex.value = null },
+        onDragStart = {
+          // Save current state to history when drag starts (before any changes)
+          editableTimingMap.value?.let { currentMap ->
+            timingMapHistory.value = timingMapHistory.value + listOf(currentMap)
+          }
+        },
         onPointDrag = { index, newRpm, newTimingRaw ->
           // Update local editable map for immediate visual feedback
           editableTimingMap.value = editableTimingMap.value?.toMutableList()?.apply {
@@ -263,8 +284,11 @@ fun TimingCurveGraph(
   timingCurve: List<TimingPoint>,
   selectedIndex: Int? = null,
   isLocked: MutableState<Boolean> = mutableStateOf(true),
+  canUndo: Boolean = false,
+  onUndo: () -> Unit = {},
   onPointClick: (Int, TimingPoint) -> Unit = { _, _ -> },
   onDeselect: () -> Unit = {},
+  onDragStart: () -> Unit = {},
   onPointDrag: (Int, Int, Int) -> Unit = { _, _, _ -> },
   modifier: Modifier = Modifier
 ) {
@@ -301,6 +325,7 @@ fun TimingCurveGraph(
   // Use rememberUpdatedState to access latest values inside gesture handler without restarting it
   val currentTimingCurve = rememberUpdatedState(timingCurve)
   val currentSelectedIndex = rememberUpdatedState(selectedIndex)
+  val currentOnDragStart = rememberUpdatedState(onDragStart)
   val currentOnPointDrag = rememberUpdatedState(onPointDrag)
   val currentOnPointClick = rememberUpdatedState(onPointClick)
   val currentOnDeselect = rememberUpdatedState(onDeselect)
@@ -323,6 +348,7 @@ fun TimingCurveGraph(
             var hasMoved = false
             var isDraggingPoint = false
             var draggedPointIndex = -1
+            var hasSavedHistory = false  // Track if we've saved history for this drag operation
             
             // Check if we're starting a drag on the selected point (only if unlocked)
             // Use currentSelectedIndex.value to get latest value
@@ -382,11 +408,17 @@ fun TimingCurveGraph(
                   
                   // Only process movement if we've moved enough (prevents accidental moves on tap)
                   if (totalDragDistance > 8.dp.toPx()) {
-                    hasMoved = true
+                  hasMoved = true
+                  
+                  if (isDraggingPoint && draggedPointIndex >= 0 && !currentIsLocked.value) {
+                    // Save history once when drag starts (before any changes)
+                    if (!hasSavedHistory) {
+                      currentOnDragStart.value()
+                      hasSavedHistory = true
+                    }
                     
-                    if (isDraggingPoint && draggedPointIndex >= 0 && !currentIsLocked.value) {
-                      // Dragging a selected point - convert position to RPM and timing values
-                      val dims = chartDimensions.value
+                    // Dragging a selected point - convert position to RPM and timing values
+                    val dims = chartDimensions.value
                       val curve = currentTimingCurve.value
                       if (dims != null && curve.isNotEmpty()) {
                         val currentPos = change.position
@@ -632,6 +664,27 @@ fun TimingCurveGraph(
         drawText(
           textLayoutResult = zoomTextLayout,
           topLeft = Offset(chartRight - zoomTextLayout.size.width - 4.dp.toPx(), chartTop + 4.dp.toPx())
+        )
+      }
+    }
+    
+    // Undo button overlay in top LEFT corner - positioned for right-handed users to avoid accidental clicks
+    // Only visible when there's something to undo
+    if (canUndo) {
+      Box(
+        modifier = Modifier
+          .align(Alignment.TopStart)
+          .padding(start = 32.dp, top = 8.dp)
+          .background(
+            color = graphColors.unsafe.copy(alpha = 0.4f),
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+          )
+          .clickable { onUndo() }
+          .padding(8.dp)
+      ) {
+        Text(
+          text = "↩️",
+          fontSize = 28.sp
         )
       }
     }
