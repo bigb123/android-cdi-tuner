@@ -2,11 +2,11 @@ package com.tuner.cdituner
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculateZoom
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -244,9 +244,10 @@ fun TimingScreen(
 }
 
 /**
- * Composable that draws the timing curve as a line graph.
+ * Composable that draws the timing curve as a line graph with a lock button overlay.
  * Points are clickable - tap on a point to select it.
- * Selected points can be dragged up/down (timing) and left/right (RPM) within bounds.
+ * Selected points can be dragged up/down (timing) and left/right (RPM) within bounds,
+ * but only when the graph is unlocked.
  * Supports horizontal zoom (pinch) and pan (drag) on X-axis.
  *
  * @param timingCurve List of timing points to display
@@ -278,6 +279,9 @@ fun TimingCurveGraph(
   val maxRpm = 16000f
   val maxTiming = 50f
   
+  // Lock state - locked by default to prevent accidental timing changes
+  val isLocked = remember { mutableStateOf(true) }
+  
   // Store calculated point positions for hit testing
   val pointPositions = remember { mutableStateOf<List<Offset>>(emptyList()) }
   
@@ -296,331 +300,350 @@ fun TimingCurveGraph(
   val currentOnPointDrag = rememberUpdatedState(onPointDrag)
   val currentOnPointClick = rememberUpdatedState(onPointClick)
   val currentOnDeselect = rememberUpdatedState(onDeselect)
+  val currentIsLocked = rememberUpdatedState(isLocked.value)
 
-  Canvas(
-    modifier = modifier
-      .clipToBounds()
-      // Combined gesture handler for tap, zoom, pan, and point dragging
-      // Use Unit as key so it doesn't restart when timingCurve changes during drag
-      .pointerInput(Unit) {
-        awaitEachGesture {
-          val firstDown = awaitFirstDown(requireUnconsumed = false)
-          val startPosition = firstDown.position
-          var totalDragDistance = 0f
-          var isMultiTouch = false
-          var hasMoved = false
-          var isDraggingPoint = false
-          var draggedPointIndex = -1
-          
-          // Check if we're starting a drag on the selected point
-          // Use currentSelectedIndex.value to get latest value
-          val selIdx = currentSelectedIndex.value
-          if (selIdx != null) {
-            val positions = pointPositions.value
-            if (selIdx < positions.size) {
-              val selectedPointPos = positions[selIdx]
-              val touchRadius = 30.dp.toPx() // Slightly larger touch area for dragging
-              val distance = kotlin.math.sqrt(
-                (startPosition.x - selectedPointPos.x) * (startPosition.x - selectedPointPos.x) +
-                (startPosition.y - selectedPointPos.y) * (startPosition.y - selectedPointPos.y)
-              )
-              if (distance <= touchRadius) {
-                isDraggingPoint = true
-                draggedPointIndex = selIdx
+  // Use Box to overlay the lock button on top of the canvas
+  Box(modifier = modifier) {
+    Canvas(
+      modifier = Modifier
+        .fillMaxSize()
+        .clipToBounds()
+        // Combined gesture handler for tap, zoom, pan, and point dragging
+        // Use Unit as key so it doesn't restart when timingCurve changes during drag
+        .pointerInput(Unit) {
+          awaitEachGesture {
+            val firstDown = awaitFirstDown(requireUnconsumed = false)
+            val startPosition = firstDown.position
+            var totalDragDistance = 0f
+            var isMultiTouch = false
+            var hasMoved = false
+            var isDraggingPoint = false
+            var draggedPointIndex = -1
+            
+            // Check if we're starting a drag on the selected point (only if unlocked)
+            // Use currentSelectedIndex.value to get latest value
+            val selIdx = currentSelectedIndex.value
+            val locked = currentIsLocked.value
+            if (selIdx != null && !locked) {
+              val positions = pointPositions.value
+              if (selIdx < positions.size) {
+                val selectedPointPos = positions[selIdx]
+                val touchRadius = 30.dp.toPx() // Slightly larger touch area for dragging
+                val distance = kotlin.math.sqrt(
+                  (startPosition.x - selectedPointPos.x) * (startPosition.x - selectedPointPos.x) +
+                  (startPosition.y - selectedPointPos.y) * (startPosition.y - selectedPointPos.y)
+                )
+                if (distance <= touchRadius) {
+                  isDraggingPoint = true
+                  draggedPointIndex = selIdx
+                }
               }
             }
-          }
-          
-          do {
-            val event = awaitPointerEvent()
-            val pointerCount = event.changes.count { it.pressed }
             
-            // Check if this is a multi-touch gesture (pinch zoom)
-            if (pointerCount >= 2) {
-              isMultiTouch = true
-              isDraggingPoint = false // Cancel point drag on multi-touch
-              val zoom = event.calculateZoom()
-              val centroid = event.calculateCentroid(useCurrent = true)
+            do {
+              val event = awaitPointerEvent()
+              val pointerCount = event.changes.count { it.pressed }
               
-              if (zoom != 1f) {
-                // Calculate new zoom (clamp between 1x and 4x)
-                val newZoom = (zoomX.floatValue * zoom).coerceIn(1f, 4f)
+              // Check if this is a multi-touch gesture (pinch zoom)
+              if (pointerCount >= 2) {
+                isMultiTouch = true
+                isDraggingPoint = false // Cancel point drag on multi-touch
+                val zoom = event.calculateZoom()
+                val centroid = event.calculateCentroid(useCurrent = true)
                 
-                // Adjust pan to keep the centroid point stable
-                val chartLeft = 8.dp.toPx()  // Must match drawing code
-                val chartWidth = size.width - chartLeft - 8.dp.toPx()
-                val visibleRpmRange = maxRpm / zoomX.floatValue
-                val centroidRpm = panX.floatValue + ((centroid.x - chartLeft) / chartWidth) * visibleRpmRange
-                
-                val newVisibleRpmRange = maxRpm / newZoom
-                val newPanX = centroidRpm - ((centroid.x - chartLeft) / chartWidth) * newVisibleRpmRange
-                
-                zoomX.floatValue = newZoom
-                panX.floatValue = newPanX.coerceIn(0f, maxRpm - newVisibleRpmRange)
-              }
-              
-              event.changes.forEach { it.consume() }
-            } else if (pointerCount == 1) {
-              val change = event.changes.first()
-              if (change.positionChanged()) {
-                val dragX = change.position.x - change.previousPosition.x
-                val dragY = change.position.y - change.previousPosition.y
-                totalDragDistance += kotlin.math.sqrt(dragX * dragX + dragY * dragY)
-                
-                // Only process movement if we've moved enough (prevents accidental moves on tap)
-                if (totalDragDistance > 8.dp.toPx()) {
-                  hasMoved = true
+                if (zoom != 1f) {
+                  // Calculate new zoom (clamp between 1x and 4x)
+                  val newZoom = (zoomX.floatValue * zoom).coerceIn(1f, 4f)
                   
-                  if (isDraggingPoint && draggedPointIndex >= 0) {
-                    // Dragging a selected point - convert position to RPM and timing values
-                    val dims = chartDimensions.value
-                    val curve = currentTimingCurve.value
-                    if (dims != null && curve.isNotEmpty()) {
-                      val currentPos = change.position
-                      
-                      // Convert pixel position to RPM and timing values
+                  // Adjust pan to keep the centroid point stable
+                  val chartLeft = 8.dp.toPx()  // Must match drawing code
+                  val chartWidth = size.width - chartLeft - 8.dp.toPx()
+                  val visibleRpmRange = maxRpm / zoomX.floatValue
+                  val centroidRpm = panX.floatValue + ((centroid.x - chartLeft) / chartWidth) * visibleRpmRange
+                  
+                  val newVisibleRpmRange = maxRpm / newZoom
+                  val newPanX = centroidRpm - ((centroid.x - chartLeft) / chartWidth) * newVisibleRpmRange
+                  
+                  zoomX.floatValue = newZoom
+                  panX.floatValue = newPanX.coerceIn(0f, maxRpm - newVisibleRpmRange)
+                }
+                
+                event.changes.forEach { it.consume() }
+              } else if (pointerCount == 1) {
+                val change = event.changes.first()
+                if (change.positionChanged()) {
+                  val dragX = change.position.x - change.previousPosition.x
+                  val dragY = change.position.y - change.previousPosition.y
+                  totalDragDistance += kotlin.math.sqrt(dragX * dragX + dragY * dragY)
+                  
+                  // Only process movement if we've moved enough (prevents accidental moves on tap)
+                  if (totalDragDistance > 8.dp.toPx()) {
+                    hasMoved = true
+                    
+                    if (isDraggingPoint && draggedPointIndex >= 0 && !currentIsLocked.value) {
+                      // Dragging a selected point - convert position to RPM and timing values
+                      val dims = chartDimensions.value
+                      val curve = currentTimingCurve.value
+                      if (dims != null && curve.isNotEmpty()) {
+                        val currentPos = change.position
+                        
+                        // Convert pixel position to RPM and timing values
+                        val visibleRpmRange = maxRpm / zoomX.floatValue
+                        val minVisibleRpm = panX.floatValue
+                        
+                        // Calculate new RPM from X position
+                        val newRpm = minVisibleRpm + ((currentPos.x - dims.chartLeft) / dims.chartWidth) * visibleRpmRange
+                        
+                        // Calculate new timing from Y position (inverted - top is higher timing)
+                        val newTiming = ((dims.chartBottom - currentPos.y) / dims.chartHeight) * maxTiming
+                        
+                        // Calculate bounds based on neighboring points (use latest curve data)
+                        val minRpm = if (draggedPointIndex > 0) {
+                          curve[draggedPointIndex - 1].rpm + 100 // At least 100 RPM gap
+                        } else {
+                          500 // Minimum RPM
+                        }
+                        val maxRpmBound = if (draggedPointIndex < curve.size - 1) {
+                          curve[draggedPointIndex + 1].rpm - 100 // At least 100 RPM gap
+                        } else {
+                          16000 // Maximum RPM
+                        }
+                        
+                        // Clamp values within bounds
+                        val clampedRpm = newRpm.toInt().coerceIn(minRpm, maxRpmBound)
+                        val clampedTiming = (newTiming * 100).toInt().coerceIn(0, 5000) // 0-50 degrees as raw value
+                        
+                        // Notify parent of the drag (use latest callback)
+                        currentOnPointDrag.value(draggedPointIndex, clampedRpm, clampedTiming)
+                      }
+                      change.consume()
+                    } else {
+                      // Not dragging a point - pan the chart
+                      val chartLeft = 8.dp.toPx()  // Must match drawing code
+                      val chartWidth = size.width - chartLeft - 8.dp.toPx()
                       val visibleRpmRange = maxRpm / zoomX.floatValue
-                      val minVisibleRpm = panX.floatValue
+                      val rpmPerPixel = visibleRpmRange / chartWidth
                       
-                      // Calculate new RPM from X position
-                      val newRpm = minVisibleRpm + ((currentPos.x - dims.chartLeft) / dims.chartWidth) * visibleRpmRange
+                      // Pan in opposite direction of drag
+                      val newPanX = panX.floatValue - dragX * rpmPerPixel
+                      panX.floatValue = newPanX.coerceIn(0f, maxRpm - visibleRpmRange)
                       
-                      // Calculate new timing from Y position (inverted - top is higher timing)
-                      val newTiming = ((dims.chartBottom - currentPos.y) / dims.chartHeight) * maxTiming
-                      
-                      // Calculate bounds based on neighboring points (use latest curve data)
-                      val minRpm = if (draggedPointIndex > 0) {
-                        curve[draggedPointIndex - 1].rpm + 100 // At least 100 RPM gap
-                      } else {
-                        500 // Minimum RPM
-                      }
-                      val maxRpmBound = if (draggedPointIndex < curve.size - 1) {
-                        curve[draggedPointIndex + 1].rpm - 100 // At least 100 RPM gap
-                      } else {
-                        16000 // Maximum RPM
-                      }
-                      
-                      // Clamp values within bounds
-                      val clampedRpm = newRpm.toInt().coerceIn(minRpm, maxRpmBound)
-                      val clampedTiming = (newTiming * 100).toInt().coerceIn(0, 5000) // 0-50 degrees as raw value
-                      
-                      // Notify parent of the drag (use latest callback)
-                      currentOnPointDrag.value(draggedPointIndex, clampedRpm, clampedTiming)
+                      change.consume()
                     }
-                    change.consume()
-                  } else {
-                    // Not dragging a point - pan the chart
-                    val chartLeft = 8.dp.toPx()  // Must match drawing code
-                    val chartWidth = size.width - chartLeft - 8.dp.toPx()
-                    val visibleRpmRange = maxRpm / zoomX.floatValue
-                    val rpmPerPixel = visibleRpmRange / chartWidth
-                    
-                    // Pan in opposite direction of drag
-                    val newPanX = panX.floatValue - dragX * rpmPerPixel
-                    panX.floatValue = newPanX.coerceIn(0f, maxRpm - visibleRpmRange)
-                    
-                    change.consume()
                   }
                 }
               }
-            }
-          } while (event.changes.any { it.pressed })
-          
-          // If it was a tap (no significant movement and single touch), handle point selection
-          if (!hasMoved && !isMultiTouch) {
-            val touchRadius = 24.dp.toPx()
-            val positions = pointPositions.value
-            val curve = currentTimingCurve.value
-            var pointClicked = false
+            } while (event.changes.any { it.pressed })
             
-            positions.forEachIndexed { index, pointOffset ->
-              if (!pointClicked && index < curve.size) {
-                val distance = kotlin.math.sqrt(
-                  (startPosition.x - pointOffset.x) * (startPosition.x - pointOffset.x) +
-                  (startPosition.y - pointOffset.y) * (startPosition.y - pointOffset.y)
-                )
-                if (distance <= touchRadius) {
-                  currentOnPointClick.value(index, curve[index])
-                  pointClicked = true
+            // If it was a tap (no significant movement and single touch), handle point selection
+            if (!hasMoved && !isMultiTouch) {
+              val touchRadius = 24.dp.toPx()
+              val positions = pointPositions.value
+              val curve = currentTimingCurve.value
+              var pointClicked = false
+              
+              positions.forEachIndexed { index, pointOffset ->
+                if (!pointClicked && index < curve.size) {
+                  val distance = kotlin.math.sqrt(
+                    (startPosition.x - pointOffset.x) * (startPosition.x - pointOffset.x) +
+                    (startPosition.y - pointOffset.y) * (startPosition.y - pointOffset.y)
+                  )
+                  if (distance <= touchRadius) {
+                    currentOnPointClick.value(index, curve[index])
+                    pointClicked = true
+                  }
                 }
               }
-            }
-            // Tap was not on any point - deselect
-            if (!pointClicked) {
-              currentOnDeselect.value()
+              // Tap was not on any point - deselect
+              if (!pointClicked) {
+                currentOnDeselect.value()
+              }
             }
           }
         }
+    ) {
+      val chartLeft = 24.dp.toPx()  // Leave space for Y-axis labels
+      val chartRight = size.width - 16.dp.toPx()
+      val chartTop = 16.dp.toPx()
+      val chartBottom = size.height - 36.dp.toPx()
+      val chartWidth = chartRight - chartLeft
+      val chartHeight = chartBottom - chartTop
+      
+      // Store chart dimensions for gesture handler to use
+      chartDimensions.value = ChartDimensions(
+        chartLeft = chartLeft,
+        chartRight = chartRight,
+        chartTop = chartTop,
+        chartBottom = chartBottom,
+        chartWidth = chartWidth,
+        chartHeight = chartHeight
+      )
+      
+      // Calculate visible RPM range based on zoom
+      val visibleRpmRange = maxRpm / zoomX.floatValue
+      val minVisibleRpm = panX.floatValue
+      val maxVisibleRpm = minVisibleRpm + visibleRpmRange
+      
+      // Helper function to convert RPM to X coordinate
+      fun rpmToX(rpm: Float): Float {
+        return chartLeft + ((rpm - minVisibleRpm) / visibleRpmRange) * chartWidth
       }
-  ) {
-    val chartLeft = 24.dp.toPx()  // Leave space for Y-axis labels
-    val chartRight = size.width - 16.dp.toPx()
-    val chartTop = 16.dp.toPx()
-    val chartBottom = size.height - 36.dp.toPx()
-    val chartWidth = chartRight - chartLeft
-    val chartHeight = chartBottom - chartTop
-    
-    // Store chart dimensions for gesture handler to use
-    chartDimensions.value = ChartDimensions(
-      chartLeft = chartLeft,
-      chartRight = chartRight,
-      chartTop = chartTop,
-      chartBottom = chartBottom,
-      chartWidth = chartWidth,
-      chartHeight = chartHeight
-    )
-    
-    // Calculate visible RPM range based on zoom
-    val visibleRpmRange = maxRpm / zoomX.floatValue
-    val minVisibleRpm = panX.floatValue
-    val maxVisibleRpm = minVisibleRpm + visibleRpmRange
-    
-    // Helper function to convert RPM to X coordinate
-    fun rpmToX(rpm: Float): Float {
-      return chartLeft + ((rpm - minVisibleRpm) / visibleRpmRange) * chartWidth
-    }
 
-    // Draw grid lines - dynamically adjust based on zoom level
-    val rpmStep = when {
-      zoomX.floatValue >= 3f -> 500
-      zoomX.floatValue >= 2f -> 1000
-      else -> 2000
-    }
-    val timingSteps = listOf(0f, 10f, 20f, 30f, 40f, 50f)
+      // Draw grid lines - dynamically adjust based on zoom level
+      val rpmStep = when {
+        zoomX.floatValue >= 3f -> 500
+        zoomX.floatValue >= 2f -> 1000
+        else -> 2000
+      }
+      val timingSteps = listOf(0f, 10f, 20f, 30f, 40f, 50f)
 
-    // Vertical grid lines (RPM) - only draw visible ones
-    var rpm = ((minVisibleRpm / rpmStep).toInt() * rpmStep)
-    while (rpm <= maxVisibleRpm) {
-      val x = rpmToX(rpm.toFloat())
-      if (x >= chartLeft && x <= chartRight) {
+      // Vertical grid lines (RPM) - only draw visible ones
+      var rpm = ((minVisibleRpm / rpmStep).toInt() * rpmStep)
+      while (rpm <= maxVisibleRpm) {
+        val x = rpmToX(rpm.toFloat())
+        if (x >= chartLeft && x <= chartRight) {
+          drawLine(
+            color = gridColor,
+            start = Offset(x, chartTop),
+            end = Offset(x, chartBottom),
+            strokeWidth = 1.dp.toPx()
+          )
+          // RPM labels
+          val label = if (rpm >= 1000) "${rpm / 1000}k" else "$rpm"
+          val textLayoutResult = textMeasurer.measure(
+            text = label,
+            style = TextStyle(fontSize = 10.sp, color = textColor)
+          )
+          drawText(
+            textLayoutResult = textLayoutResult,
+            topLeft = Offset(x - textLayoutResult.size.width / 2, chartBottom + 8.dp.toPx())
+          )
+        }
+        rpm += rpmStep
+      }
+
+      // Horizontal grid lines (Timing) - these don't change with zoom
+      timingSteps.forEach { timing ->
+        val y = chartBottom - (timing / maxTiming) * chartHeight
         drawLine(
           color = gridColor,
-          start = Offset(x, chartTop),
-          end = Offset(x, chartBottom),
+          start = Offset(chartLeft, y),
+          end = Offset(chartRight, y),
           strokeWidth = 1.dp.toPx()
         )
-        // RPM labels
-        val label = if (rpm >= 1000) "${rpm / 1000}k" else "$rpm"
+        // Timing labels
+        val label = "${timing.toInt()}°"
         val textLayoutResult = textMeasurer.measure(
           text = label,
           style = TextStyle(fontSize = 10.sp, color = textColor)
         )
         drawText(
           textLayoutResult = textLayoutResult,
-          topLeft = Offset(x - textLayoutResult.size.width / 2, chartBottom + 8.dp.toPx())
+          topLeft = Offset(chartLeft - textLayoutResult.size.width - 8.dp.toPx(), y - textLayoutResult.size.height / 2)
         )
       }
-      rpm += rpmStep
-    }
 
-    // Horizontal grid lines (Timing) - these don't change with zoom
-    timingSteps.forEach { timing ->
-      val y = chartBottom - (timing / maxTiming) * chartHeight
+      // Draw axes
       drawLine(
-        color = gridColor,
-        start = Offset(chartLeft, y),
-        end = Offset(chartRight, y),
-        strokeWidth = 1.dp.toPx()
+        color = axisColor,
+        start = Offset(chartLeft, chartTop),
+        end = Offset(chartLeft, chartBottom),
+        strokeWidth = 2.dp.toPx()
       )
-      // Timing labels
-      val label = "${timing.toInt()}°"
-      val textLayoutResult = textMeasurer.measure(
-        text = label,
-        style = TextStyle(fontSize = 10.sp, color = textColor)
+      drawLine(
+        color = axisColor,
+        start = Offset(chartLeft, chartBottom),
+        end = Offset(chartRight, chartBottom),
+        strokeWidth = 2.dp.toPx()
       )
-      drawText(
-        textLayoutResult = textLayoutResult,
-        topLeft = Offset(chartLeft - textLayoutResult.size.width - 8.dp.toPx(), y - textLayoutResult.size.height / 2)
-      )
-    }
 
-    // Draw axes
-    drawLine(
-      color = axisColor,
-      start = Offset(chartLeft, chartTop),
-      end = Offset(chartLeft, chartBottom),
-      strokeWidth = 2.dp.toPx()
-    )
-    drawLine(
-      color = axisColor,
-      start = Offset(chartLeft, chartBottom),
-      end = Offset(chartRight, chartBottom),
-      strokeWidth = 2.dp.toPx()
-    )
+      // Draw timing curve - clipped to chart area so it doesn't overlap Y-axis
+      if (timingCurve.isNotEmpty()) {
+        val path = Path()
+        var isFirst = true
+        
+        // Calculate and store all point positions for hit testing
+        val positions = mutableListOf<Offset>()
 
-    // Draw timing curve - clipped to chart area so it doesn't overlap Y-axis
-    if (timingCurve.isNotEmpty()) {
-      val path = Path()
-      var isFirst = true
-      
-      // Calculate and store all point positions for hit testing
-      val positions = mutableListOf<Offset>()
+        timingCurve.forEach { point ->
+          val x = rpmToX(point.rpm.toFloat())
+          val y = chartBottom - (point.timingDegrees / maxTiming) * chartHeight
+          positions.add(Offset(x, y))
 
-      timingCurve.forEach { point ->
-        val x = rpmToX(point.rpm.toFloat())
-        val y = chartBottom - (point.timingDegrees / maxTiming) * chartHeight
-        positions.add(Offset(x, y))
-
-        if (isFirst) {
-          path.moveTo(x, y)
-          isFirst = false
-        } else {
-          path.lineTo(x, y)
+          if (isFirst) {
+            path.moveTo(x, y)
+            isFirst = false
+          } else {
+            path.lineTo(x, y)
+          }
         }
-      }
-      
-      // Store positions for hit testing in pointerInput
-      pointPositions.value = positions
+        
+        // Store positions for hit testing in pointerInput
+        pointPositions.value = positions
 
-      // Clip the curve and points to the chart area (prevents overlapping Y-axis when zoomed)
-      clipRect(
-        left = chartLeft,
-        top = chartTop,
-        right = size.width,
-        bottom = chartBottom
-      ) {
-        // Draw the curve line
-        drawPath(
-          path = path,
-          color = lineColor,
-          style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
-        )
+        // Clip the curve and points to the chart area (prevents overlapping Y-axis when zoomed)
+        clipRect(
+          left = chartLeft,
+          top = chartTop,
+          right = size.width,
+          bottom = chartBottom
+        ) {
+          // Draw the curve line
+          drawPath(
+            path = path,
+            color = lineColor,
+            style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
+          )
 
-        // Draw data points (only visible ones)
-        positions.forEachIndexed { index, offset ->
-          // Only draw points that are within the visible area
-          if (offset.x >= chartLeft - 10.dp.toPx() && offset.x <= chartRight + 10.dp.toPx()) {
-            val isSelected = selectedIndex == index
-            
-            // Outer circle (larger when selected)
-            drawCircle(
-              color = if (isSelected) SELECTED_COLOR else lineColor,
-              radius = if (isSelected) 10.dp.toPx() else 6.dp.toPx(),
-              center = offset
-            )
-            // Inner circle
-            drawCircle(
-              color = Color.White,
-              radius = if (isSelected) 5.dp.toPx() else 3.dp.toPx(),
-              center = offset
-            )
+          // Draw data points (only visible ones)
+          positions.forEachIndexed { index, offset ->
+            // Only draw points that are within the visible area
+            if (offset.x >= chartLeft - 10.dp.toPx() && offset.x <= chartRight + 10.dp.toPx()) {
+              val isSelected = selectedIndex == index
+              
+              // Outer circle (larger when selected)
+              drawCircle(
+                color = if (isSelected) SELECTED_COLOR else lineColor,
+                radius = if (isSelected) 10.dp.toPx() else 6.dp.toPx(),
+                center = offset
+              )
+              // Inner circle
+              drawCircle(
+                color = Color.White,
+                radius = if (isSelected) 5.dp.toPx() else 3.dp.toPx(),
+                center = offset
+              )
+            }
           }
         }
       }
-    }
 
-    // Draw zoom indicator if zoomed in
-    if (zoomX.floatValue > 1.01f) {
-      val zoomText = "%.1fx".format(zoomX.floatValue)
-      val zoomTextLayout = textMeasurer.measure(
-        text = zoomText,
-        style = TextStyle(fontSize = 12.sp, color = textColor.copy(alpha = 0.7f))
-      )
-      drawText(
-        textLayoutResult = zoomTextLayout,
-        topLeft = Offset(chartRight - zoomTextLayout.size.width - 4.dp.toPx(), chartTop + 4.dp.toPx())
-      )
+      // Draw zoom indicator if zoomed in
+      if (zoomX.floatValue > 1.01f) {
+        val zoomText = "%.1fx".format(zoomX.floatValue)
+        val zoomTextLayout = textMeasurer.measure(
+          text = zoomText,
+          style = TextStyle(fontSize = 12.sp, color = textColor.copy(alpha = 0.7f))
+        )
+        drawText(
+          textLayoutResult = zoomTextLayout,
+          topLeft = Offset(chartRight - zoomTextLayout.size.width - 4.dp.toPx(), chartTop + 4.dp.toPx())
+        )
+      }
     }
+    
+    // Padlock button overlay in top right corner (offset left to not obscure last graph point)
+    // Semi-transparent to not obstruct visibility
+    Text(
+      text = if (isLocked.value) "🔒" else "🔓",
+      fontSize = 24.sp,
+      modifier = Modifier
+        .align(Alignment.TopEnd)
+        .padding(end = 48.dp, top = 8.dp)
+        .clickable { isLocked.value = !isLocked.value }
+        .padding(4.dp),
+      color = if (isLocked.value) Color.Green.copy(alpha = 0.5f) else Color.Red.copy(alpha = 0.5f)
+    )
   }
 }
 
