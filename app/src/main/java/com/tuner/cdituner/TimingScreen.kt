@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.text.TextStyle
@@ -72,12 +73,15 @@ fun TimingScreen(
   
   // Determine if we're loading
   val isLoading = statusMessage?.contains("Reading") == true
+  
+  // Track selected point index - shared between graph and table
+  val selectedPointIndex = remember { mutableStateOf<Int?>(null) }
 
   Column(
     modifier = modifier
       .fillMaxSize()
       .background(gaugeColors.gaugeBackground)
-      .padding(16.dp)
+      .padding(4.dp)
       .verticalScroll(rememberScrollState()),
     horizontalAlignment = Alignment.CenterHorizontally
   ) {
@@ -129,7 +133,12 @@ fun TimingScreen(
       // Graph spans full width (no horizontal padding) for better readability
       TimingCurveGraph(
         timingCurve = timingMap,
-        onPointClick = onPointClick,
+        selectedIndex = selectedPointIndex.value,
+        onPointClick = { index, point ->
+          selectedPointIndex.value = index
+          onPointClick(index, point)
+        },
+        onDeselect = { selectedPointIndex.value = null },
         modifier = Modifier
           .fillMaxWidth()
           .height(300.dp)
@@ -148,6 +157,7 @@ fun TimingScreen(
 
       TimingTable(
         timingCurve = timingMap,
+        selectedIndex = selectedPointIndex.value,
         modifier = Modifier.fillMaxWidth()
       )
     } else {
@@ -196,13 +206,17 @@ fun TimingScreen(
  * Supports horizontal zoom (pinch) and pan (drag) on X-axis.
  *
  * @param timingCurve List of timing points to display
+ * @param selectedIndex Currently selected point index (null if none)
  * @param onPointClick Callback when a point is clicked (index, point)
+ * @param onDeselect Callback when user taps outside any point
  * @param modifier Modifier for the canvas
  */
 @Composable
 fun TimingCurveGraph(
   timingCurve: List<TimingPoint>,
+  selectedIndex: Int? = null,
   onPointClick: (Int, TimingPoint) -> Unit = { _, _ -> },
+  onDeselect: () -> Unit = {},
   modifier: Modifier = Modifier
 ) {
   val gaugeColors = LocalGaugeColors.current
@@ -217,9 +231,6 @@ fun TimingCurveGraph(
   // Chart bounds - 16000 RPM max to accommodate all 16 points
   val maxRpm = 16000f
   val maxTiming = 50f
-  
-  // Track selected point index
-  val selectedPointIndex = remember { mutableStateOf<Int?>(null) }
   
   // Store calculated point positions for hit testing
   val pointPositions = remember { mutableStateOf<List<Offset>>(emptyList()) }
@@ -257,8 +268,8 @@ fun TimingCurveGraph(
                 val newZoom = (zoomX.floatValue * zoom).coerceIn(1f, 4f)
                 
                 // Adjust pan to keep the centroid point stable
-                val chartLeft = 8.dp.toPx()
-                val chartWidth = size.width - 16.dp.toPx()
+                val chartLeft = 8.dp.toPx()  // Must match drawing code
+                val chartWidth = size.width - chartLeft - 8.dp.toPx()
                 val visibleRpmRange = maxRpm / zoomX.floatValue
                 val centroidRpm = panX.floatValue + ((centroid.x - chartLeft) / chartWidth) * visibleRpmRange
                 
@@ -280,7 +291,8 @@ fun TimingCurveGraph(
                 // Only pan if we've moved enough (prevents accidental pan on tap)
                 if (totalDragDistance > 8.dp.toPx()) {
                   hasMoved = true
-                  val chartWidth = size.width - 16.dp.toPx()
+                  val chartLeft = 8.dp.toPx()  // Must match drawing code
+                  val chartWidth = size.width - chartLeft - 8.dp.toPx()
                   val visibleRpmRange = maxRpm / zoomX.floatValue
                   val rpmPerPixel = visibleRpmRange / chartWidth
                   
@@ -307,7 +319,6 @@ fun TimingCurveGraph(
                   (startPosition.y - pointOffset.y) * (startPosition.y - pointOffset.y)
                 )
                 if (distance <= touchRadius) {
-                  selectedPointIndex.value = index
                   onPointClick(index, timingCurve[index])
                   pointClicked = true
                 }
@@ -315,13 +326,13 @@ fun TimingCurveGraph(
             }
             // Tap was not on any point - deselect
             if (!pointClicked) {
-              selectedPointIndex.value = null
+              onDeselect()
             }
           }
         }
       }
   ) {
-    val chartLeft = 8.dp.toPx()
+    val chartLeft = 24.dp.toPx()  // Leave space for Y-axis labels
     val chartRight = size.width - 8.dp.toPx()
     val chartTop = 16.dp.toPx()
     val chartBottom = size.height - 36.dp.toPx()
@@ -406,7 +417,7 @@ fun TimingCurveGraph(
       strokeWidth = 2.dp.toPx()
     )
 
-    // Draw timing curve
+    // Draw timing curve - clipped to chart area so it doesn't overlap Y-axis
     if (timingCurve.isNotEmpty()) {
       val path = Path()
       var isFirst = true
@@ -430,31 +441,39 @@ fun TimingCurveGraph(
       // Store positions for hit testing in pointerInput
       pointPositions.value = positions
 
-      // Draw the curve line
-      drawPath(
-        path = path,
-        color = lineColor,
-        style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
-      )
+      // Clip the curve and points to the chart area (prevents overlapping Y-axis when zoomed)
+      clipRect(
+        left = chartLeft,
+        top = chartTop,
+        right = chartRight,
+        bottom = chartBottom
+      ) {
+        // Draw the curve line
+        drawPath(
+          path = path,
+          color = lineColor,
+          style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
+        )
 
-      // Draw data points (only visible ones)
-      positions.forEachIndexed { index, offset ->
-        // Only draw points that are within the visible area
-        if (offset.x >= chartLeft - 10.dp.toPx() && offset.x <= chartRight + 10.dp.toPx()) {
-          val isSelected = selectedPointIndex.value == index
-          
-          // Outer circle (larger when selected)
-          drawCircle(
-            color = if (isSelected) selectedColor else lineColor,
-            radius = if (isSelected) 10.dp.toPx() else 6.dp.toPx(),
-            center = offset
-          )
-          // Inner circle
-          drawCircle(
-            color = Color.White,
-            radius = if (isSelected) 5.dp.toPx() else 3.dp.toPx(),
-            center = offset
-          )
+        // Draw data points (only visible ones)
+        positions.forEachIndexed { index, offset ->
+          // Only draw points that are within the visible area
+          if (offset.x >= chartLeft - 10.dp.toPx() && offset.x <= chartRight + 10.dp.toPx()) {
+            val isSelected = selectedIndex == index
+            
+            // Outer circle (larger when selected)
+            drawCircle(
+              color = if (isSelected) selectedColor else lineColor,
+              radius = if (isSelected) 10.dp.toPx() else 6.dp.toPx(),
+              center = offset
+            )
+            // Inner circle
+            drawCircle(
+              color = Color.White,
+              radius = if (isSelected) 5.dp.toPx() else 3.dp.toPx(),
+              center = offset
+            )
+          }
         }
       }
     }
@@ -476,13 +495,19 @@ fun TimingCurveGraph(
 
 /**
  * Composable that displays the timing curve data in a table format.
+ *
+ * @param timingCurve List of timing points to display
+ * @param selectedIndex Currently selected point index (null if none) - row will be highlighted
+ * @param modifier Modifier for the table
  */
 @Composable
 fun TimingTable(
   timingCurve: List<TimingPoint>,
+  selectedIndex: Int? = null,
   modifier: Modifier = Modifier
 ) {
   val gaugeColors = LocalGaugeColors.current
+  val selectedColor = Color(0xFFFFD700) // Gold color for selected row
   
   Column(modifier = modifier) {
     // Header row
@@ -511,12 +536,16 @@ fun TimingTable(
     
     // Data rows
     timingCurve.forEachIndexed { index, point ->
+      val isSelected = selectedIndex == index
       Row(
         modifier = Modifier
           .fillMaxWidth()
           .background(
-            if (index % 2 == 0) Color.Transparent 
-            else gaugeColors.labelText.copy(alpha = 0.05f)
+            when {
+              isSelected -> selectedColor.copy(alpha = 0.3f)
+              index % 2 == 0 -> Color.Transparent
+              else -> gaugeColors.labelText.copy(alpha = 0.05f)
+            }
           )
           .padding(vertical = 6.dp, horizontal = 16.dp),
         horizontalArrangement = Arrangement.SpaceBetween
@@ -524,14 +553,15 @@ fun TimingTable(
         Text(
           text = "${point.rpm}",
           style = MaterialTheme.typography.bodyMedium,
-          color = gaugeColors.labelText,
+          color = if (isSelected) selectedColor else gaugeColors.labelText,
+          fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
           modifier = Modifier.weight(1f)
         )
         Text(
           text = String.format("%.2f°", point.timingDegrees),
           style = MaterialTheme.typography.bodyMedium,
-          color = gaugeColors.timingArc,
-          fontWeight = FontWeight.Medium,
+          color = if (isSelected) selectedColor else gaugeColors.timingArc,
+          fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
           modifier = Modifier.weight(1f)
         )
       }
