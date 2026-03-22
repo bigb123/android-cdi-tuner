@@ -45,7 +45,7 @@ import com.tuner.cdituner.ui.theme.LocalGaugeColors
  */
 
 val SELECTED_COLOR = Color(0xFF4CAF50) // Green color for selection
-val SELECTED_COLOR_BACKGROUND = Color(0xFFFFEB3B) // Yellow color to highlight table selection
+val SELECTED_COLOR_BACKGROUND = Color(0xFFFFF5AB) // Yellow color to highlight table selection
 
 /**
  * Data class representing a single point in the ignition timing curve.
@@ -454,7 +454,7 @@ fun TimingCurveGraph(
       }
   ) {
     val chartLeft = 24.dp.toPx()  // Leave space for Y-axis labels
-    val chartRight = size.width - 8.dp.toPx()
+    val chartRight = size.width - 16.dp.toPx()
     val chartTop = 16.dp.toPx()
     val chartBottom = size.height - 36.dp.toPx()
     val chartWidth = chartRight - chartLeft
@@ -672,7 +672,7 @@ fun TimingTable(
           .fillMaxWidth()
           .background(
             when {
-              isSelected -> SELECTED_COLOR_BACKGROUND.copy(alpha = 0.3f)
+              isSelected -> SELECTED_COLOR_BACKGROUND
               index % 2 == 0 -> Color.Transparent
               else -> gaugeColors.labelText.copy(alpha = 0.05f)
             }
