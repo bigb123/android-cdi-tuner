@@ -67,7 +67,7 @@ val NightGraphColors = GraphColors(
 
 // Day/Light theme graph colors
 val DayGraphColors = GraphColors(
-  pointSelected = Color(0xFF795B02),      // Brown for selection
+  pointSelected = Color(0xFF584100),      // Brown for selection
   tableSelectedBackground = Color(0xFFFFF5AB), // Light yellow for day mode
   safe = SafeColorDay,
   unsafe = UnsafeColorDay
