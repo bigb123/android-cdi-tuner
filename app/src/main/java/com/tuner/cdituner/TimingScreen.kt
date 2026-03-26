@@ -78,6 +78,7 @@ private data class ChartDimensions(
  * @param onRefresh Callback to force refresh timing map from CDI
  * @param onPointClick Callback when a timing point is clicked (index, point)
  * @param onPointDrag Callback when a timing point is dragged to new values (index, newRpm, newTimingRaw)
+ * @param onTimingMapChanged Callback when the timing map has been modified and drag ended (full map for saving to CDI)
  */
 @Composable
 fun TimingScreen(
@@ -86,6 +87,7 @@ fun TimingScreen(
   onRefresh: () -> Unit,
   onPointClick: (Int, TimingPoint) -> Unit = { _, _ -> },
   onPointDrag: (Int, Int, Int) -> Unit = { _, _, _ -> },
+  onTimingMapChanged: (List<TimingPoint>) -> Unit = { _ -> },
   modifier: Modifier = Modifier
 ) {
   val gaugeColors = LocalGaugeColors.current
@@ -202,6 +204,12 @@ fun TimingScreen(
           // Also notify parent (for potential saving to CDI later)
           onPointDrag(index, newRpm, newTimingRaw)
         },
+        onDragEnd = {
+          // When drag ends, notify parent with the full updated timing map
+          editableTimingMap.value?.let { updatedMap ->
+            onTimingMapChanged(updatedMap)
+          }
+        },
         modifier = Modifier
           .fillMaxWidth()
           .height(300.dp)
@@ -290,6 +298,7 @@ fun TimingCurveGraph(
   onDeselect: () -> Unit = {},
   onDragStart: () -> Unit = {},
   onPointDrag: (Int, Int, Int) -> Unit = { _, _, _ -> },
+  onDragEnd: () -> Unit = {},
   modifier: Modifier = Modifier
 ) {
   val gaugeColors = LocalGaugeColors.current
@@ -327,6 +336,7 @@ fun TimingCurveGraph(
   val currentSelectedIndex = rememberUpdatedState(selectedIndex)
   val currentOnDragStart = rememberUpdatedState(onDragStart)
   val currentOnPointDrag = rememberUpdatedState(onPointDrag)
+  val currentOnDragEnd = rememberUpdatedState(onDragEnd)
   val currentOnPointClick = rememberUpdatedState(onPointClick)
   val currentOnDeselect = rememberUpdatedState(onDeselect)
   val currentIsLocked = rememberUpdatedState(isLocked.value)
@@ -470,6 +480,11 @@ fun TimingCurveGraph(
                 }
               }
             } while (event.changes.any { it.pressed })
+            
+            // If we were dragging a point and made changes, notify that drag ended
+            if (hasSavedHistory && isDraggingPoint) {
+              currentOnDragEnd.value()
+            }
             
             // If it was a tap (no significant movement and single touch), handle point selection
             if (!hasMoved && !isMultiTouch) {
