@@ -704,6 +704,19 @@ fun TimingCurveGraph(
       }
     }
     
+    // Warning text overlay at top center when edit mode is active (unlocked)
+    // Semi-transparent red text to raise awareness without being too intrusive
+    if (!isLocked.value) {
+      Text(
+        text = "Warning: edit mode active",
+        color = Color.Red.copy(alpha = 0.5f),
+        fontSize = 14.sp,
+        modifier = Modifier
+          .align(Alignment.TopCenter)
+          .padding(top = 4.dp)
+      )
+    }
+    
     // Padlock button overlay in top right corner (offset left to not obscure last graph point)
     // Green background when locked (safe), red background when unlocked (editable/danger)
     Box(
