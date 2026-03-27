@@ -249,6 +249,25 @@ class ConnectionManager(private val context: Context) {
   }
 
   /**
+   * Write the timing map to CDI.
+   * @param timingMap List of 16 TimingPoints to write
+   */
+  fun writeTimingMap(timingMap: List<TimingPoint>) {
+    when (currentConnectionType) {
+      ConnectionManager.ConnectionType.USB -> {
+        usbConnection?.writeTimingMap(timingMap)
+      }
+      ConnectionManager.ConnectionType.BLUETOOTH -> {
+        // TODO: Implement for Bluetooth when needed
+        _timingMapStatus.value = "Timing map writing not yet supported over Bluetooth"
+      }
+      ConnectionManager.ConnectionType.NONE -> {
+        _timingMapStatus.value = "Not connected to CDI"
+      }
+    }
+  }
+
+  /**
    * Disconnect current connection
    */
   fun disconnect() {
