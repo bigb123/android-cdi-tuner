@@ -78,7 +78,7 @@ private data class ChartDimensions(
  * @param onRefresh Callback to force refresh timing map from CDI
  * @param onPointClick Callback when a timing point is clicked (index, point)
  * @param onPointDrag Callback when a timing point is dragged to new values (index, newRpm, newTimingRaw)
- * @param onTimingMapChanged Callback when the timing map has been modified and drag ended (full map for saving to CDI)
+ * @param onLockWithChanges Callback when the chart is locked AND there are pending changes to save (full map for saving to CDI)
  */
 @Composable
 fun TimingScreen(
@@ -87,7 +87,7 @@ fun TimingScreen(
   onRefresh: () -> Unit,
   onPointClick: (Int, TimingPoint) -> Unit = { _, _ -> },
   onPointDrag: (Int, Int, Int) -> Unit = { _, _, _ -> },
-  onTimingMapChanged: (List<TimingPoint>) -> Unit = { _ -> },
+  onLockWithChanges: (List<TimingPoint>) -> Unit = { _ -> },
   modifier: Modifier = Modifier
 ) {
   val gaugeColors = LocalGaugeColors.current
@@ -107,11 +107,15 @@ fun TimingScreen(
   // History stack for undo functionality - stores previous states of the timing map
   val timingMapHistory = remember { mutableStateOf<List<List<TimingPoint>>>(emptyList()) }
   
+  // Track if there are unsaved changes (any edits made since last lock/save)
+  val hasUnsavedChanges = remember { mutableStateOf(false) }
+  
   // Sync editable map with source when source changes (e.g., after refresh)
-  // Also clear history when a fresh map is loaded from CDI
+  // Also clear history and unsaved changes flag when a fresh map is loaded from CDI
   LaunchedEffect(timingMap) {
     editableTimingMap.value = timingMap?.toList()
     timingMapHistory.value = emptyList()
+    hasUnsavedChanges.value = false
   }
   
   // The map to display - use editable copy if available, otherwise source
@@ -175,6 +179,7 @@ fun TimingScreen(
         timingCurve = displayMap,
         selectedIndex = selectedPointIndex.value,
         isLocked = isLocked,
+        hasUnsavedChanges = hasUnsavedChanges.value,
         canUndo = timingMapHistory.value.isNotEmpty(),
         onUndo = {
           // Pop the last state from history and restore it
@@ -183,6 +188,10 @@ fun TimingScreen(
             val previousState = history.last()
             timingMapHistory.value = history.dropLast(1)
             editableTimingMap.value = previousState
+            // If we've undone all changes (history is now empty), mark as no unsaved changes
+            if (timingMapHistory.value.isEmpty()) {
+              hasUnsavedChanges.value = false
+            }
           }
         },
         onPointClick = { index, point ->
@@ -205,9 +214,18 @@ fun TimingScreen(
           onPointDrag(index, newRpm, newTimingRaw)
         },
         onDragEnd = {
-          // When drag ends, notify parent with the full updated timing map
-          editableTimingMap.value?.let { updatedMap ->
-            onTimingMapChanged(updatedMap)
+          // Mark that we have unsaved changes when drag ends
+          hasUnsavedChanges.value = true
+        },
+        onLock = {
+          // When user locks the chart, save the timing map to CDI if there are changes
+          if (hasUnsavedChanges.value) {
+            editableTimingMap.value?.let { updatedMap ->
+              onLockWithChanges(updatedMap)
+            }
+            // Clear unsaved changes flag and history after saving
+            hasUnsavedChanges.value = false
+            timingMapHistory.value = emptyList()
           }
         },
         modifier = Modifier
@@ -281,9 +299,11 @@ fun TimingScreen(
  *
  * @param timingCurve List of timing points to display
  * @param selectedIndex Currently selected point index (null if none)
+ * @param hasUnsavedChanges Whether there are unsaved changes to the timing map
  * @param onPointClick Callback when a point is clicked (index, point)
  * @param onDeselect Callback when user taps outside any point
  * @param onPointDrag Callback when a point is dragged to new values (index, newRpm, newTimingRaw)
+ * @param onLock Callback when the chart is locked (padlock clicked to lock)
  * @param modifier Modifier for the canvas
  */
 @Preview
@@ -292,6 +312,7 @@ fun TimingCurveGraph(
   timingCurve: List<TimingPoint>,
   selectedIndex: Int? = null,
   isLocked: MutableState<Boolean> = mutableStateOf(true),
+  hasUnsavedChanges: Boolean = false,
   canUndo: Boolean = false,
   onUndo: () -> Unit = {},
   onPointClick: (Int, TimingPoint) -> Unit = { _, _ -> },
@@ -299,6 +320,7 @@ fun TimingCurveGraph(
   onDragStart: () -> Unit = {},
   onPointDrag: (Int, Int, Int) -> Unit = { _, _, _ -> },
   onDragEnd: () -> Unit = {},
+  onLock: () -> Unit = {},
   modifier: Modifier = Modifier
 ) {
   val gaugeColors = LocalGaugeColors.current
@@ -710,8 +732,8 @@ fun TimingCurveGraph(
     // Semi-transparent red text to raise awareness without being too intrusive
     if (!isLocked.value) {
       Text(
-        text = "Warning: edit mode active",
-        color = Color.Red.copy(alpha = 0.5f),
+        text = if (hasUnsavedChanges) "⚠️ Unsaved changes - tap 🔓 to save" else "Warning: edit mode active",
+        color = Color.Red.copy(alpha = if (hasUnsavedChanges) 0.8f else 0.5f),
         fontSize = 14.sp,
         modifier = Modifier
           .align(Alignment.TopCenter)
@@ -721,6 +743,7 @@ fun TimingCurveGraph(
     
     // Padlock button overlay in top right corner (offset left to not obscure last graph point)
     // Green background when locked (safe), red background when unlocked (editable/danger)
+    // When clicked to lock AND there are unsaved changes, the onLock callback saves the map to CDI
     Box(
       modifier = Modifier
         .align(Alignment.TopEnd)
@@ -729,7 +752,14 @@ fun TimingCurveGraph(
           color = selectionColor(isLocked.value, 0.4f),
           shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
         )
-        .clickable { isLocked.value = !isLocked.value }
+        .clickable {
+          val wasUnlocked = !isLocked.value
+          isLocked.value = !isLocked.value
+          // If we just locked (was unlocked, now locked), trigger onLock to save changes
+          if (wasUnlocked && isLocked.value) {
+            onLock()
+          }
+        }
         .padding(8.dp)
     ) {
       Text(

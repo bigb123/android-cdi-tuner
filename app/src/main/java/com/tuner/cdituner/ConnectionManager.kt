@@ -230,8 +230,7 @@ class ConnectionManager(private val context: Context) {
         usbConnection?.readTimingMap()
       }
       ConnectionType.BLUETOOTH -> {
-        // TODO: Implement for Bluetooth when needed
-        _timingMapStatus.value = "Timing map reading not yet supported over Bluetooth"
+        bluetoothConnection?.readTimingMap()
       }
       ConnectionType.NONE -> {
         _timingMapStatus.value = "Not connected to CDI"
@@ -258,8 +257,7 @@ class ConnectionManager(private val context: Context) {
         usbConnection?.writeTimingMap(timingMap)
       }
       ConnectionManager.ConnectionType.BLUETOOTH -> {
-        // TODO: Implement for Bluetooth when needed
-        _timingMapStatus.value = "Timing map writing not yet supported over Bluetooth"
+        bluetoothConnection?.writeTimingMap(timingMap)
       }
       ConnectionManager.ConnectionType.NONE -> {
         _timingMapStatus.value = "Not connected to CDI"
@@ -374,6 +372,20 @@ class ConnectionManager(private val context: Context) {
         launch {
           service.receivedData.collect { data ->
             _receivedData.value = data
+          }
+        }
+
+        // Observe timing map data
+        launch {
+          service.timingMap.collect { data ->
+            _timingMap.value = data
+          }
+        }
+
+        // Observe timing map status
+        launch {
+          service.timingMapStatus.collect { status ->
+            _timingMapStatus.value = status
           }
         }
       }

@@ -8,9 +8,12 @@ import android.bluetooth.BluetoothSocket
 import android.content.Intent
 import android.os.Binder
 import android.os.IBinder
+import android.util.Log
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
@@ -31,9 +34,18 @@ class BluetoothConnection : Service() {
   private val _connectionStatus = MutableStateFlow("Disconnected")
   val connectionStatus = _connectionStatus.asStateFlow()
 
+  private val _timingMap = MutableStateFlow<List<TimingPoint>?>(null)
+  val timingMap = _timingMap.asStateFlow()
+
+  private val _timingMapStatus = MutableStateFlow<String?>(null)
+  val timingMapStatus = _timingMapStatus.asStateFlow()
+
   private val job = SupervisorJob()
   private val scope = CoroutineScope(Dispatchers.IO + job)
   private var readingJob: Job? = null
+  
+  // Mutex to prevent parallel CDI communication - CDI expects sequential messages
+  private val cdiMutex = Mutex()
 
   companion object {
     private const val RECONNECT_DELAY_MS = 1000L
@@ -187,6 +199,248 @@ class BluetoothConnection : Service() {
   @SuppressLint("MissingPermission")
   fun getPairedDevices(): List<BluetoothDevice> {
     return bluetoothAdapter?.bondedDevices?.toList() ?: emptyList()
+  }
+
+  /**
+   * Reads the ignition timing map from CDI.
+   * This pauses the normal data monitoring during the read operation.
+   *
+   * Protocol:
+   * 1. Send initial request
+   * 2. Read page 0, send acknowledgment
+   * 3. Read page 1, send acknowledgment
+   * 4. Parse and return timing map data
+   */
+  fun readTimingMap() {
+    scope.launch {
+      // Acquire lock to prevent parallel CDI communication
+      cdiMutex.withLock {
+        // Pause normal data monitoring
+        readingJob?.cancel()
+        
+        // Clear cached timing map to ensure StateFlow emits the new value
+        // (StateFlow uses structural equality, so identical data wouldn't be re-emitted)
+        _timingMap.value = null
+        _timingMapStatus.value = "Reading timing map..."
+
+        try {
+          val timingMapBytes = ByteArray(CdiTimingMapProtocol.USEFUL_DATA_SIZE * CdiTimingMapProtocol.PAGES_TO_READ)
+
+          var requestMessage = CdiTimingMapProtocol.READ_TIMING_MAP_REQUEST // Message content will get updated in the loop
+          
+          // Read pages
+          for (pageNum in 0 until CdiTimingMapProtocol.PAGES_TO_READ) {
+
+            // Send read timing map request
+            outputStream?.write(requestMessage)
+            outputStream?.flush()
+
+            _timingMapStatus.value = "Reading page ${pageNum + 1}/${CdiTimingMapProtocol.PAGES_TO_READ}..."
+
+            // Read page response
+            val pageBuffer = ByteArray(CdiTimingMapProtocol.PAGE_SIZE)
+            var totalNumberOfReadBytes = readBytesWithTimeout(pageBuffer, 500)
+            var attempts = 0
+            val maxAttempts = 10
+
+            // First let's try to receive a message in a proper format.
+            // Retry send request for ignition table if received message doesn't match the pattern
+            while (pageBuffer[0] != 0x02.toByte() || pageBuffer[1] != 0x07.toByte() || totalNumberOfReadBytes == 0) {
+              // Request new reading
+              outputStream?.write(requestMessage)
+              outputStream?.flush()
+              // in the meantime print last reading
+              Log.d("BluetoothConnection", "Incorrect response. pageBuffer: ${pageBuffer.joinToString(" ") { "%02X".format(it) }}")
+              // Retry reading
+              totalNumberOfReadBytes = readBytesWithTimeout(pageBuffer, 500)
+              Log.d("BluetoothConnection", "Bytes read: $totalNumberOfReadBytes")
+            }
+            Log.d("BluetoothConnection", "response after first read: ${pageBuffer.joinToString(" ") { "%02X".format(it) }}")
+            Log.d("BluetoothConnection", "Bytes read: $totalNumberOfReadBytes")
+
+            // Page may arrive incomplete (less than 64 bytes). Retrieve the rest of the message by retrying reading without sending any new request messages to CDI.
+            // We are reading an entire message chunk by chunk. Size of chunk is in 'tempNumberOfBytesRead' in bytes
+            while (totalNumberOfReadBytes < CdiTimingMapProtocol.PAGE_SIZE && attempts < maxAttempts) {
+              Log.d("BluetoothConnection", "Incomplete response. Retrieving the rest of the message.")
+              val chunkContent = ByteArray(CdiTimingMapProtocol.PAGE_SIZE)
+
+              // Read new chunk of data (in bytes)
+              val chunkSize = readBytesWithTimeout(chunkContent, 500)
+              Log.d("BluetoothConnection", "Read result: ${chunkContent.joinToString(" ") { "%02X".format(it) }}")
+              Log.d("BluetoothConnection", "Number of bytes read in this loop: $chunkSize")
+
+              // Put newly read bytes into the large array
+              System.arraycopy(chunkContent, 0, pageBuffer, totalNumberOfReadBytes, chunkSize)
+
+              // New bytes arrived so we update total number of bytes read
+              totalNumberOfReadBytes += chunkSize
+              Log.d("BluetoothConnection", "Number of bytes read so far: $totalNumberOfReadBytes")
+              Log.d("BluetoothConnection", "Message so far: ${pageBuffer.joinToString(" ") { "%02X".format(it) }}")
+
+              attempts++
+            }
+
+            Log.d("BluetoothConnection", "This reading should be correct. pageBuffer: ${pageBuffer.joinToString(" ") { "%02X".format(it) }}")
+            // Load page without header (first 4 bytes) and footer (last 2 bytes) to timing map array
+            System.arraycopy(pageBuffer, 4, timingMapBytes, pageNum * CdiTimingMapProtocol.USEFUL_DATA_SIZE, CdiTimingMapProtocol.USEFUL_DATA_SIZE)
+
+            // Set a message request to retrieve next page
+            requestMessage = CdiTimingMapProtocol.createAcknowledgeMessage(pageBuffer)
+            Log.d("BluetoothConnection", "Pages content so far: ${timingMapBytes.joinToString(" ") { "%02X".format(it) }}")
+          }
+
+          // Parse the timing map
+          val timingMap = CdiTimingMapProtocol.parseTimingMap(timingMapBytes)
+          if (timingMap != null) {
+            _timingMap.value = timingMap
+            _timingMapStatus.value = "Timing map loaded (${timingMap.size} points)"
+          } else {
+            _timingMapStatus.value = "Failed to parse timing map"
+          }
+          
+        } catch (e: IOException) {
+          _timingMapStatus.value = "Error reading timing map: ${e.message}"
+        } finally {
+          startCdiCommunication()
+        }
+      } // end of cdiMutex.withLock
+    }
+  }
+
+  /**
+   * Writes the ignition timing map to CDI.
+   * This pauses the normal data monitoring during the write operation.
+   *
+   * Protocol:
+   * 1. Send write init message
+   * 2. Wait for CDI ready response
+   * 3. Send page 0, wait for echo
+   * 4. Send page 1, wait for echo
+   * 5. Send end of transmission, wait for confirmation
+   *
+   * @param timingMap List of 16 TimingPoints to write
+   */
+  fun writeTimingMap(timingMap: List<TimingPoint>) {
+    scope.launch {
+      // Acquire lock to prevent parallel CDI communication
+      cdiMutex.withLock {
+        // Pause normal data monitoring
+        readingJob?.cancel()
+        
+        _timingMapStatus.value = "Writing timing map..."
+
+        try {
+          // Step 1: Send write init message
+          _timingMapStatus.value = "Initializing write..."
+          sendMessage(CdiTimingMapProtocol.WRITE_TIMING_MAP_REQUEST)
+          
+          // Step 2: Convert timing map to page data
+          val (page0Data, page1Data) = CdiTimingMapProtocol.timingMapToPageData(timingMap)
+          
+          // Step 3: Send page 0
+          _timingMapStatus.value = "Writing page 1/2..."
+          sendMessage(CdiTimingMapProtocol.createPageWriteMessage(0, page0Data))
+
+          // Step 4: Send page 1
+          _timingMapStatus.value = "Writing page 2/2..."
+          sendMessage(CdiTimingMapProtocol.createPageWriteMessage(1, page1Data))
+          
+          // Step 5: Send end of transmission
+          _timingMapStatus.value = "Saving to CDI..."
+          sendMessage(CdiTimingMapProtocol.END_OF_TRANSMISSION)
+          
+          // Success!
+          _timingMap.value = timingMap
+          _timingMapStatus.value = "Timing map saved successfully!"
+          
+        } catch (e: IOException) {
+          _timingMapStatus.value = "Error writing timing map: ${e.message}"
+        } finally {
+          startCdiCommunication()
+        }
+      } // end of cdiMutex.withLock
+    }
+  }
+
+  private suspend fun sendMessage(message: ByteArray) {
+    var response = ByteArray(0)
+
+    // Send message and read a response
+    // If the response is different from expected - retry
+    while (!CdiTimingMapProtocol.isValidResponse(response, message)) {
+      outputStream?.write(message)
+      outputStream?.flush()
+      Log.d("BluetoothConnection", "Sent a message: ${message.joinToString(" ") { "%02X".format(it) }}")
+
+      // Wait for CDI ready response
+      response = readFullPage()
+      Log.d("BluetoothConnection", "CDI response: ${response.joinToString(" ") { "%02X".format(it) }}")
+    }
+  }
+
+  /**
+   * Reads a full 64-byte page from the Bluetooth input stream.
+   * Handles partial reads by retrying until complete or timeout.
+   */
+  private suspend fun readFullPage(): ByteArray {
+    val pageBuffer = ByteArray(CdiTimingMapProtocol.PAGE_SIZE)
+    var totalBytesRead = 0
+    var attempts = 0
+    val maxAttempts = 10
+    
+    while (totalBytesRead < CdiTimingMapProtocol.PAGE_SIZE && attempts < maxAttempts) {
+      val chunk = ByteArray(CdiTimingMapProtocol.PAGE_SIZE)
+      val bytesRead = readBytesWithTimeout(chunk, 500)
+      
+      if (bytesRead > 0) {
+        Log.d("BluetoothConnection", "Response bytes so far after sending a message: ${chunk.joinToString(" ") { "%02X".format(it) }}")
+        Log.d("BluetoothConnection", "Number of response bytes so far: $bytesRead")
+        try {
+          System.arraycopy(chunk, 0, pageBuffer, totalBytesRead, bytesRead)
+        } catch (e: ArrayIndexOutOfBoundsException) { // If the response doesn't fit in 64 bytes then it's incorrect and we have to retry
+          Log.d("BluetoothConnection", "Incorrect response. Bytes received so far: ${pageBuffer.joinToString(" ") { "%02X".format(it) }}")
+          Log.d("BluetoothConnection", "Incorrect response. Bytes received in the last (failing) loop: ${chunk.joinToString(" ") { "%02X".format(it) }}")
+          _timingMapStatus.value = "CDI not ready to accept timing map. Retrying"
+          return ByteArray(0)
+        }
+        totalBytesRead += bytesRead
+      }
+      
+      attempts++
+      if (totalBytesRead < CdiTimingMapProtocol.PAGE_SIZE) {
+        delay(50)
+      }
+    }
+    
+    return pageBuffer
+  }
+
+  /**
+   * Reads bytes from Bluetooth input stream with a timeout.
+   * Unlike USB serial which has built-in timeout, Bluetooth streams need manual handling.
+   *
+   * @param buffer Buffer to read into
+   * @param timeoutMs Timeout in milliseconds
+   * @return Number of bytes read
+   */
+  private suspend fun readBytesWithTimeout(buffer: ByteArray, timeoutMs: Int): Int {
+    val startTime = System.currentTimeMillis()
+    var totalBytesRead = 0
+    
+    while (System.currentTimeMillis() - startTime < timeoutMs) {
+      val available = inputStream?.available() ?: 0
+      if (available > 0) {
+        val bytesToRead = minOf(available, buffer.size - totalBytesRead)
+        val bytesRead = inputStream?.read(buffer, totalBytesRead, bytesToRead) ?: 0
+        totalBytesRead += bytesRead
+        if (totalBytesRead >= buffer.size) {
+          break
+        }
+      }
+      delay(10)
+    }
+    
+    return totalBytesRead
   }
 
   inner class BluetoothBinder : Binder() {
