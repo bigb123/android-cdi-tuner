@@ -443,20 +443,22 @@ fun TimingCurveGraph(
                         // Calculate new timing from Y position (inverted - top is higher timing)
                         val newTiming = ((dims.chartBottom - currentPos.y) / dims.chartHeight) * maxTiming
                         
-                        // Calculate bounds based on neighboring points (use latest curve data)
-                        val minRpm = if (draggedPointIndex > 0) {
-                          curve[draggedPointIndex - 1].rpm + 100 // At least 100 RPM gap
-                        } else {
-                          500 // Minimum RPM
-                        }
-                        val maxRpmBound = if (draggedPointIndex < curve.size - 1) {
-                          curve[draggedPointIndex + 1].rpm - 100 // At least 100 RPM gap
-                        } else {
-                          16000 // Maximum RPM
-                        }
+                        // First point (1000 RPM) and last point (16000 RPM) have fixed RPM values
+                        // User can only change timing (Y-axis) for these boundary points
+                        val isFirstPoint = draggedPointIndex == 0
+                        val isLastPoint = draggedPointIndex == curve.size - 1
                         
-                        // Clamp values within bounds
-                        val clampedRpm = newRpm.toInt().coerceIn(minRpm, maxRpmBound)
+                        // Calculate RPM bounds based on neighboring points (use latest curve data)
+                        // First and last points are locked to their RPM values
+                        val clampedRpm = when {
+                          isFirstPoint -> 1000  // First point locked at 1000 RPM
+                          isLastPoint -> 16000  // Last point locked at 16000 RPM
+                          else -> {
+                            val minRpm = curve[draggedPointIndex - 1].rpm + 100 // At least 100 RPM gap
+                            val maxRpmBound = curve[draggedPointIndex + 1].rpm - 100 // At least 100 RPM gap
+                            newRpm.toInt().coerceIn(minRpm, maxRpmBound)
+                          }
+                        }
                         val clampedTiming = (newTiming * 100).toInt().coerceIn(0, 5000) // 0-50 degrees as raw value
                         
                         // Notify parent of the drag (use latest callback)
