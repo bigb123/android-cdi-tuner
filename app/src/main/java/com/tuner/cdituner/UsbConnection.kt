@@ -17,6 +17,8 @@ import com.hoho.android.usbserial.driver.UsbSerialProber
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.IOException
 import android.util.Log
 import kotlin.coroutines.resume
@@ -44,6 +46,9 @@ class UsbConnection : Service() {
   private val job = SupervisorJob()
   private val scope = CoroutineScope(Dispatchers.IO + job)
   private var readingJob: Job? = null
+  
+  // Mutex to prevent parallel CDI communication - CDI expects sequential messages
+  private val cdiMutex = Mutex()
 
   // Callback to resume coroutine when permission result arrives
   private var permissionContinuation: ((Boolean) -> Unit)? = null
@@ -217,15 +222,17 @@ class UsbConnection : Service() {
    */
   fun readTimingMap() {
     scope.launch {
-      // Pause normal data monitoring
-      readingJob?.cancel()
-      
-      // Clear cached timing map to ensure StateFlow emits the new value
-      // (StateFlow uses structural equality, so identical data wouldn't be re-emitted)
-      _timingMap.value = null
-      _timingMapStatus.value = "Reading timing map..."
+      // Acquire lock to prevent parallel CDI communication
+      cdiMutex.withLock {
+        // Pause normal data monitoring
+        readingJob?.cancel()
+        
+        // Clear cached timing map to ensure StateFlow emits the new value
+        // (StateFlow uses structural equality, so identical data wouldn't be re-emitted)
+        _timingMap.value = null
+        _timingMapStatus.value = "Reading timing map..."
 
-      try {
+        try {
         val timingMapBytes = ByteArray(CdiTimingMapProtocol.USEFUL_DATA_SIZE * CdiTimingMapProtocol.PAGES_TO_READ)
 
         var requestMessage = CdiTimingMapProtocol.READ_TIMING_MAP_REQUEST // Message content will get updated in the loop
@@ -299,11 +306,12 @@ class UsbConnection : Service() {
           _timingMapStatus.value = "Failed to parse timing map"
         }
         
-      } catch (e: IOException) {
-        _timingMapStatus.value = "Error reading timing map: ${e.message}"
-      } finally {
-        startDataMonitor()
-      }
+        } catch (e: IOException) {
+          _timingMapStatus.value = "Error reading timing map: ${e.message}"
+        } finally {
+          startDataMonitor()
+        }
+      } // end of cdiMutex.withLock
     }
   }
 
@@ -322,40 +330,43 @@ class UsbConnection : Service() {
    */
   fun writeTimingMap(timingMap: List<TimingPoint>) {
     scope.launch {
-      // Pause normal data monitoring
-      readingJob?.cancel()
-      
-      _timingMapStatus.value = "Writing timing map..."
+      // Acquire lock to prevent parallel CDI communication
+      cdiMutex.withLock {
+        // Pause normal data monitoring
+        readingJob?.cancel()
+        
+        _timingMapStatus.value = "Writing timing map..."
 
-      try {
-        // Step 1: Send write init message
-        _timingMapStatus.value = "Initializing write..."
-        sendMessage(CdiTimingMapProtocol.WRITE_TIMING_MAP_REQUEST)
-        
-        // Step 2: Convert timing map to page data
-        val (page0Data, page1Data) = CdiTimingMapProtocol.timingMapToPageData(timingMap)
-        
-        // Step 3: Send page 0
-        _timingMapStatus.value = "Writing page 1/2..."
-        sendMessage(CdiTimingMapProtocol.createPageWriteMessage(0, page0Data))
+        try {
+          // Step 1: Send write init message
+          _timingMapStatus.value = "Initializing write..."
+          sendMessage(CdiTimingMapProtocol.WRITE_TIMING_MAP_REQUEST)
+          
+          // Step 2: Convert timing map to page data
+          val (page0Data, page1Data) = CdiTimingMapProtocol.timingMapToPageData(timingMap)
+          
+          // Step 3: Send page 0
+          _timingMapStatus.value = "Writing page 1/2..."
+          sendMessage(CdiTimingMapProtocol.createPageWriteMessage(0, page0Data))
 
-        // Step 4: Send page 1
-        _timingMapStatus.value = "Writing page 2/2..."
-        sendMessage(CdiTimingMapProtocol.createPageWriteMessage(1, page1Data))
-        
-        // Step 5: Send end of transmission
-        _timingMapStatus.value = "Saving to CDI..."
-        sendMessage(CdiTimingMapProtocol.END_OF_TRANSMISSION)
-        
-        // Success!
-        _timingMap.value = timingMap
-        _timingMapStatus.value = "Timing map saved successfully!"
-        
-      } catch (e: IOException) {
-        _timingMapStatus.value = "Error writing timing map: ${e.message}"
-      } finally {
-        startDataMonitor()
-      }
+          // Step 4: Send page 1
+          _timingMapStatus.value = "Writing page 2/2..."
+          sendMessage(CdiTimingMapProtocol.createPageWriteMessage(1, page1Data))
+          
+          // Step 5: Send end of transmission
+          _timingMapStatus.value = "Saving to CDI..."
+          sendMessage(CdiTimingMapProtocol.END_OF_TRANSMISSION)
+          
+          // Success!
+          _timingMap.value = timingMap
+          _timingMapStatus.value = "Timing map saved successfully!"
+          
+        } catch (e: IOException) {
+          _timingMapStatus.value = "Error writing timing map: ${e.message}"
+        } finally {
+          startDataMonitor()
+        }
+      } // end of cdiMutex.withLock
     }
   }
 
