@@ -160,7 +160,7 @@ class ConnectionManager(private val context: Context) {
       bluetoothConnection?.let {
         observeBluetoothService()
         it.connectToDevice(deviceAddress)
-        it.startCdiCommunication()
+        it.startDataMonitor()
         
         // Save Bluetooth device to preferences
         preferences.saveBluetoothDevice(deviceAddress, deviceName)

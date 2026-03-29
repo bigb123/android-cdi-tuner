@@ -1,7 +1,5 @@
 package com.tuner.cdituner
 
-import android.util.Log
-
 /**
  * Protocol handler for reading and writing ignition timing maps to/from CDI.
  *
@@ -68,7 +66,8 @@ object CdiTimingMapProtocol {
   )
 
   /** Expected page size in bytes */
-  const val PAGE_SIZE = 64
+  const val TIMING_PAGE_SIZE = 64
+  const val STATUS_PAGE_SIZE = 22
   const val USEFUL_DATA_SIZE = 58 // From entire page we actually only need interior bytes that are surrounded by header (4 bytes) and footer (2 bytes)
 
   /** Checksum end markers */
@@ -87,7 +86,7 @@ object CdiTimingMapProtocol {
    * @return true if valid CDI response page
    */
   fun isValidPage(page: ByteArray): Boolean {
-    return page.size == PAGE_SIZE && 
+    return page.size == TIMING_PAGE_SIZE &&
            page[0] == 0x02.toByte() && 
            page[1] == 0x07.toByte() &&
            page[63] == 0xB9.toByte()
@@ -173,7 +172,7 @@ object CdiTimingMapProtocol {
    * @return Complete 64-byte message with checksum
    */
   fun createMessage(data: ByteArray, isWriteCommand: Boolean = true): ByteArray {
-    val message = ByteArray(PAGE_SIZE)
+    val message = ByteArray(TIMING_PAGE_SIZE)
     // Copy data (up to 62 bytes)
     data.copyInto(message, 0, 0, minOf(62, data.size))
     // Calculate and append checksum
@@ -202,26 +201,15 @@ object CdiTimingMapProtocol {
     return createMessage(data, isWriteCommand = true)
   }
 
-  fun isValidResponse(response: ByteArray, sentMessage: ByteArray): Boolean {
-
-    // Let's create a message with a content that is expected as a response
-
-    // First, save sent message to a new array
-    val expectedMessage = sentMessage.copyOf()
-
-    // Then, update first byte that should be is 02 in a response. In sent message it's 01
-    System.arraycopy(byteArrayOf(0x02), 0, expectedMessage, 0, 1)
-
-    // We also have to update checksum (last 2 bytes)
-    // Use checksum calculation instead of adjusting bytes manually
-    System.arraycopy(calculateChecksum(expectedMessage, false), 0,expectedMessage, 62, 2)
-    Log.d("TimingMapProtocol", "Response: ${response.joinToString(" ") { "%02X".format(it) }}" )
-    Log.d("TimingMapProtocol", "Expected: ${expectedMessage.joinToString(" ") { "%02X".format(it) }}" )
-
-
-    // If the expected message matches the response then we're on the money.
-    return expectedMessage.contentEquals(response)
-  }
+  // We verify only response header as sometimes response has to be reread multiple times.
+//  fun isValidResponseHeader(response: ByteArray, sentMessage: ByteArray): Boolean {
+//
+//    if (response.size == 0)             return false
+//    if (response[0] != 0x02.toByte())   return false
+//    if (response[1] != sentMessage[1] + 1)  return false
+//
+//    return true
+//  }
 
   /**
    * Converts a list of TimingPoints to the raw byte format for writing to CDI.

@@ -732,7 +732,7 @@ fun TimingCurveGraph(
     // Semi-transparent red text to raise awareness without being too intrusive
     if (!isLocked.value) {
       Text(
-        text = if (hasUnsavedChanges) "⚠️ Unsaved changes - tap 🔓 to save" else "Warning: edit mode active",
+        text = if (hasUnsavedChanges) "⚠️ Unsaved changes\nTap 🔓 to save" else "Warning: edit mode active",
         color = Color.Red.copy(alpha = if (hasUnsavedChanges) 0.8f else 0.5f),
         fontSize = 14.sp,
         modifier = Modifier
