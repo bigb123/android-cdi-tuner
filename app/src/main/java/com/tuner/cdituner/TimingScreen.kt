@@ -337,8 +337,8 @@ fun TimingCurveGraph(
   val axisColor = gaugeColors.labelText.copy(alpha = 0.6f)
   val textColor = gaugeColors.labelText
   
-  // Chart bounds - 16000 RPM max to accommodate all 16 points
-  val maxRpm = 16000f
+  // Chart bounds - 17000 RPM max to allow easy navigation past the last point at 16000 RPM
+  val maxRpm = 17000f
   val maxTiming = 50f
   
   // Store calculated point positions for hit testing

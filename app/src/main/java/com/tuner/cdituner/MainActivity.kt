@@ -23,6 +23,7 @@ import com.tuner.cdituner.ui.theme.CDITunerTheme
 class MainActivity : ComponentActivity() {
 
   private lateinit var connectionManager: ConnectionManager
+  private lateinit var speedProvider: SpeedProvider
   private var deviceInfo by mutableStateOf<String?>(null)
   
   // Track if the app was launched by USB attachment (to skip auto-connect from preferences)
@@ -39,6 +40,16 @@ class MainActivity : ComponentActivity() {
     }
   }
 
+  // Location permission launcher for GPS speedometer
+  private val locationPermissionLauncher = registerForActivityResult(
+    ActivityResultContracts.RequestPermission()
+  ) { isGranted ->
+    if (isGranted) {
+      // Permission granted, start GPS updates
+      speedProvider.startLocationUpdates()
+    }
+  }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
 
@@ -47,6 +58,9 @@ class MainActivity : ComponentActivity() {
 
     // Initialize ConnectionManager
     connectionManager = ConnectionManager(this)
+    
+    // Initialize SpeedProvider for GPS speedometer
+    speedProvider = SpeedProvider(this)
 
     // Check if launched by USB attachment
     launchedByUsb = handleIntent(intent)
@@ -54,6 +68,11 @@ class MainActivity : ComponentActivity() {
     // If NOT launched by USB, auto-connect based on saved preferences
     if (!launchedByUsb) {
       connectionManager.autoConnectFromPreferences()
+    }
+    
+    // Start GPS updates if permission is already granted
+    if (speedProvider.hasLocationPermission()) {
+      speedProvider.startLocationUpdates()
     }
 
     setContent {
@@ -104,8 +123,19 @@ class MainActivity : ComponentActivity() {
     val timingMap by connectionManager.timingMap.collectAsState()
     val timingMapStatus by connectionManager.timingMapStatus.collectAsState()
     
+    // GPS speed data
+    val speedKmh by speedProvider.speedKmh.collectAsState()
+    val hasGpsFix by speedProvider.hasGpsFix.collectAsState()
+    
     // Tab state - 0 = Gauges, 1 = Timing, 2 = Logging
     var selectedTab by remember { mutableIntStateOf(0) }
+    
+    // Request location permission when Gauges tab is selected
+    LaunchedEffect(selectedTab) {
+      if (selectedTab == 0 && !speedProvider.hasLocationPermission()) {
+        requestLocationPermission()
+      }
+    }
     
     // Trigger timing map read when Timing tab is selected
     LaunchedEffect(selectedTab) {
@@ -215,12 +245,12 @@ class MainActivity : ComponentActivity() {
         Tab(
           selected = selectedTab == 1,
           onClick = { selectedTab = 1 },
-          text = { Text("📈 Timing") }
+          text = { Text("💥 Timing") }
         )
         Tab(
           selected = selectedTab == 2,
           onClick = { selectedTab = 2 },
-          text = { Text("📋 Logging") }
+          text = { Text("📈 Logging") }
         )
       }
 
@@ -232,9 +262,11 @@ class MainActivity : ComponentActivity() {
       ) {
         when (selectedTab) {
           0 -> {
-            // Gauges Screen
+            // Gauges Screen with GPS speed
             GaugesScreen(
               cdiData = cdiData,
+              speedKmh = speedKmh,
+              hasGpsFix = hasGpsFix,
               modifier = Modifier.fillMaxSize()
             )
           }
@@ -302,8 +334,13 @@ class MainActivity : ComponentActivity() {
     }
   }
 
+  private fun requestLocationPermission() {
+    locationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+  }
+
   override fun onDestroy() {
     super.onDestroy()
     connectionManager.cleanup()
+    speedProvider.cleanup()
   }
 }

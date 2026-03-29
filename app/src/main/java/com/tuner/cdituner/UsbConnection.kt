@@ -189,6 +189,7 @@ class UsbConnection : Service() {
             continue
           }
 //          else {
+//            // usage of sendMessage for some reasons didn't work immediately. Maybe worth to revisit it another time
 //            packetCount = CdiMessageProcessing.processMessage(
 //              sendMessage(
 //                CdiMessageProcessing.CDI_MESSAGE,
