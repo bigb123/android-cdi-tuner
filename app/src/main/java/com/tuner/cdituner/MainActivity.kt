@@ -244,6 +244,10 @@ class MainActivity : ComponentActivity() {
               timingMap = timingMap,
               statusMessage = timingMapStatus,
               onRefresh = { connectionManager.refreshTimingMap() },
+              onLockWithChanges = { updatedMap ->
+                // Write the updated timing map to CDI when user locks the chart (saves changes)
+                connectionManager.writeTimingMap(updatedMap)
+              },
               modifier = Modifier.fillMaxSize()
             )
           }

@@ -44,6 +44,10 @@ class UsbConnection : Service() {
   private val job = SupervisorJob()
   private val scope = CoroutineScope(Dispatchers.IO + job)
   private var readingJob: Job? = null
+  
+  // Flag to pause CDI communication without killing the connection
+  @Volatile
+  private var pauseCdiCommunication = false
 
   // Callback to resume coroutine when permission result arrives
   private var permissionContinuation: ((Boolean) -> Unit)? = null
@@ -176,31 +180,45 @@ class UsbConnection : Service() {
   private fun startDataMonitor() {
     readingJob = scope.launch {
       var packetCount = 0
-      while (isActive) {
-        try {
-          serialPort?.write(CdiMessageProcessing.CDI_MESSAGE, 500)
-          delay(100)
+      try {
+        while (isActive) {
 
-          // Read response
-          val buffer = ByteArray(64)
-          val numBytesRead = serialPort?.read(buffer, 500) ?: 0
-
-          if (numBytesRead >= 22) {
-            var startIdx = CdiMessageProcessing.extractMessageFromBytes(numBytesRead, buffer)
-
-            if (startIdx >= 0) {
-              packetCount = CdiMessageProcessing.processMessage(buffer, startIdx, packetCount, _receivedData, _connectionStatus)
-            }
-          } else if (numBytesRead > 0) {
-            _connectionStatus.value = "Connected - Partial data: $numBytesRead bytes"
+          // Skip sending/reading when paused for timing map operations
+          if (pauseCdiCommunication) {
+            delay(1000)
+            continue
           }
+//          else {
+//            packetCount = CdiMessageProcessing.processMessage(
+//              sendMessage(
+//                CdiMessageProcessing.CDI_MESSAGE,
+//                CdiTimingMapProtocol.STATUS_PAGE_SIZE
+//              ), 0, packetCount, _receivedData, _connectionStatus
+//            )
+//          }
 
-          delay(100)
-        } catch (e: IOException) {
-          _connectionStatus.value = "Connection lost: ${e.message}"
-          disconnect()
-          break
+            serialPort?.write(CdiMessageProcessing.CDI_MESSAGE, 500)
+            delay(100)
+
+            // Read response
+            val buffer = ByteArray(64)
+            val numBytesRead = serialPort?.read(buffer, 500) ?: 0
+
+            if (numBytesRead >= 22) {
+              var startIdx = CdiMessageProcessing.extractMessageFromBytes(numBytesRead, buffer)
+
+              if (startIdx >= 0) {
+                packetCount = CdiMessageProcessing.processMessage(buffer, startIdx, packetCount, _receivedData, _connectionStatus)
+              }
+            } else if (numBytesRead > 0) {
+              _connectionStatus.value = "Connected - Partial data: $numBytesRead bytes"
+            }
+
+            delay(100)
         }
+      } catch (e: IOException) {
+        _connectionStatus.value = "Connection lost: ${e.message}"
+        disconnect()
       }
     }
   }
@@ -217,8 +235,8 @@ class UsbConnection : Service() {
    */
   fun readTimingMap() {
     scope.launch {
-      // Pause normal data monitoring
-      readingJob?.cancel()
+      // Pause normal data monitoring (keeps connection alive)
+      pauseCdiCommunication = true
       
       // Clear cached timing map to ensure StateFlow emits the new value
       // (StateFlow uses structural equality, so identical data wouldn't be re-emitted)
@@ -228,58 +246,60 @@ class UsbConnection : Service() {
       try {
         val timingMapBytes = ByteArray(CdiTimingMapProtocol.USEFUL_DATA_SIZE * CdiTimingMapProtocol.PAGES_TO_READ)
 
-        var requestMessage = CdiTimingMapProtocol.READ_TIMING_MAP_REQUEST // Message content will get updated in the loop
+        var requestMessage = CdiTimingMapProtocol.READ_TIMING_MAP_REQUEST // Request message content will get updated in the loop below
         
         // Read pages
         for (pageNum in 0 until CdiTimingMapProtocol.PAGES_TO_READ) {
 
           // Send read timing map request
-          serialPort?.write(requestMessage, 1000)
+//          serialPort?.write(requestMessage, 1000)
 
           _timingMapStatus.value = "Reading page ${pageNum + 1}/${CdiTimingMapProtocol.PAGES_TO_READ}..."
+          Log.d("UsbConnection", "Reading page ${pageNum + 1}/${CdiTimingMapProtocol.PAGES_TO_READ}...")
 
           // Read page response
-          val pageBuffer = ByteArray(CdiTimingMapProtocol.PAGE_SIZE)
-          var totalNumberOfReadBytes = serialPort?.read(pageBuffer, 500)
-          var attempts = 0
-          val maxAttempts = 10
+//          val pageBuffer = ByteArray(CdiTimingMapProtocol.TIMING_PAGE_SIZE)
+          val pageBuffer = sendMessage(requestMessage)
+//          var totalNumberOfReadBytes = serialPort?.read(pageBuffer, 500)
+//          var attempts = 0
+//          val maxAttempts = 10
 
           // First let's try to receive a message in a proper format.
           // Retry send request for ignition table if received message doesn't match the pattern
-          while (pageBuffer[0] != 0x02.toByte() || pageBuffer[1] != 0x07.toByte() || totalNumberOfReadBytes == 0) {
-            // Request new reading
-            serialPort?.write(requestMessage, 1000)
-            // in the meantime print last reading
-            Log.d("UsbConnection", "Incorrect response. pageBuffer: ${pageBuffer.joinToString(" ") { "%02X".format(it) }}")
-            // Retry reading
-            totalNumberOfReadBytes = serialPort?.read(pageBuffer, 500)
-            Log.d("UsbConnection", "Bytes read: $totalNumberOfReadBytes")
-          }
-          Log.d("UsbConnection", "response after first read: ${pageBuffer.joinToString(" ") { "%02X".format(it) }}")
-//          System.arraycopy(pageBuffer, 0, wholeSinglePage, 0, totalNumberOfReadBytes ?: 0)
-          Log.d("UsbConnection", "Bytes read: $totalNumberOfReadBytes")
+//          while (pageBuffer[0] != 0x02.toByte() || pageBuffer[1] != 0x07.toByte() || totalNumberOfReadBytes == 0) {
+//            // Request new reading
+//            serialPort?.write(requestMessage, 1000)
+//            // in the meantime print last reading
+//            Log.d("UsbConnection", "Incorrect response. pageBuffer: ${pageBuffer.joinToString(" ") { "%02X".format(it) }}")
+//            // Retry reading
+//            totalNumberOfReadBytes = serialPort?.read(pageBuffer, 500)
+//            Log.d("UsbConnection", "Bytes read: $totalNumberOfReadBytes")
+//          }
+//          Log.d("UsbConnection", "response after first read: ${pageBuffer.joinToString(" ") { "%02X".format(it) }}")
+////          System.arraycopy(pageBuffer, 0, wholeSinglePage, 0, totalNumberOfReadBytes ?: 0)
+//          Log.d("UsbConnection", "Bytes read: $totalNumberOfReadBytes")
 
           // Page may arrive incomplete (less than 64 bytes). Retrieve the rest of the message by retrying reading without sending any new request messages to CDI.
           // We are reading an entire message chunk by chunk. Size of chunk is in 'tempNumberOfBytesRead' in bytes
-          while ((totalNumberOfReadBytes ?: 0) < CdiTimingMapProtocol.PAGE_SIZE && attempts < maxAttempts) {
-            Log.d("UsbConnection", "Incomplete response. Retrieving the rest of the message.")
-            val chunkContent = ByteArray(CdiTimingMapProtocol.PAGE_SIZE)
-
-            // Read new chunk of data (in bytes)
-            val chunkSize = serialPort?.read(chunkContent, 500) ?: 0
-            Log.d("UsbConnection", "Read result: ${chunkContent.joinToString(" ") { "%02X".format(it) }}")
-            Log.d("UsbConnection", "Number of bytes read in this loop: $chunkSize")
-
-            // Put newly read bytes into the large array
-            System.arraycopy(chunkContent, 0, pageBuffer, totalNumberOfReadBytes ?: 0, chunkSize ?: 0)
-
-            // New bytes arrived so we update total number of bytes read
-            totalNumberOfReadBytes = totalNumberOfReadBytes?.plus(chunkSize)
-            Log.d("UsbConnection", "Number of bytes read so far: $totalNumberOfReadBytes")
-            Log.d("UsbConnection", "Message so far: ${pageBuffer.joinToString(" ") { "%02X".format(it) }}")
-
-            attempts++
-          }
+//          while ((totalNumberOfReadBytes ?: 0) < CdiTimingMapProtocol.TIMING_PAGE_SIZE && attempts < maxAttempts) {
+//            Log.d("UsbConnection", "Incomplete response. Retrieving the rest of the message.")
+//            val chunkContent = ByteArray(CdiTimingMapProtocol.TIMING_PAGE_SIZE)
+//
+//            // Read new chunk of data (in bytes)
+//            val chunkSize = serialPort?.read(chunkContent, 500) ?: 0
+//            Log.d("UsbConnection", "Read result: ${chunkContent.joinToString(" ") { "%02X".format(it) }}")
+//            Log.d("UsbConnection", "Number of bytes read in this loop: $chunkSize")
+//
+//            // Put newly read bytes into the large array
+//            System.arraycopy(chunkContent, 0, pageBuffer, totalNumberOfReadBytes ?: 0, chunkSize ?: 0)
+//
+//            // New bytes arrived so we update total number of bytes read
+//            totalNumberOfReadBytes = totalNumberOfReadBytes?.plus(chunkSize)
+//            Log.d("UsbConnection", "Number of bytes read so far: $totalNumberOfReadBytes")
+//            Log.d("UsbConnection", "Message so far: ${pageBuffer.joinToString(" ") { "%02X".format(it) }}")
+//
+//            attempts++
+//          }
 
           Log.d("UsbConnection", "This reading should be correct. pageBuffer: ${pageBuffer.joinToString(" ") { "%02X".format(it) }}")
           // Load page without header (first 4 bytes) and footer (last 2 bytes) to timing map array
@@ -288,7 +308,7 @@ class UsbConnection : Service() {
           // Set a message request to retrieve next page
           requestMessage = CdiTimingMapProtocol.createAcknowledgeMessage(pageBuffer)
           Log.d("UsbConnection", "Pages content so far: ${timingMapBytes.joinToString(" ") { "%02X".format(it) }}")
-          }
+        }
 
         // Parse the timing map
         val timingMap = CdiTimingMapProtocol.parseTimingMap(timingMapBytes)
@@ -302,9 +322,119 @@ class UsbConnection : Service() {
       } catch (e: IOException) {
         _timingMapStatus.value = "Error reading timing map: ${e.message}"
       } finally {
-        startDataMonitor()
+        // Resume normal CDI communication
+        pauseCdiCommunication = false
       }
     }
+  }
+
+  /**
+   * Writes the ignition timing map to CDI.
+   * This pauses the normal data monitoring during the write operation.
+   *
+   * Protocol:
+   * 1. Send write init message
+   * 2. Wait for CDI ready response
+   * 3. Send page 0, wait for echo
+   * 4. Send page 1, wait for echo
+   * 5. Send end of transmission, wait for confirmation
+   *
+   * @param timingMap List of 16 TimingPoints to write
+   */
+  fun writeTimingMap(timingMap: List<TimingPoint>) {
+    scope.launch {
+      // Pause normal data monitoring (keeps connection alive)
+      pauseCdiCommunication = true
+      
+      _timingMapStatus.value = "Writing timing map..."
+
+      try {
+        // Step 1: Send write init message
+        _timingMapStatus.value = "Initializing write..."
+        sendMessage(CdiTimingMapProtocol.WRITE_TIMING_MAP_REQUEST) // we should verify response here
+        
+        // Step 2: Convert timing map to page data
+        val (page0Data, page1Data) = CdiTimingMapProtocol.timingMapToPageData(timingMap)
+        
+        // Step 3: Send page 0
+        _timingMapStatus.value = "Writing page 1/2..."
+        sendMessage(CdiTimingMapProtocol.createPageWriteMessage(0, page0Data))
+
+        // Step 4: Send page 1
+        _timingMapStatus.value = "Writing page 2/2..."
+        sendMessage(CdiTimingMapProtocol.createPageWriteMessage(1, page1Data))
+        
+        // Step 5: Send end of transmission
+        _timingMapStatus.value = "Saving to CDI..."
+        sendMessage(CdiTimingMapProtocol.END_OF_TRANSMISSION)
+        
+        // Success!
+        _timingMap.value = timingMap
+        _timingMapStatus.value = "Timing map saved successfully!"
+        
+      } catch (e: IOException) {
+        _timingMapStatus.value = "Error writing timing map: ${e.message}"
+      } finally {
+        // Resume normal CDI communication
+        pauseCdiCommunication = false
+      }
+    }
+  }
+
+
+
+  private suspend fun sendMessage(message: ByteArray, responseSize: Int = CdiTimingMapProtocol.TIMING_PAGE_SIZE): ByteArray {
+
+    var response = ByteArray(0)
+
+    // Send message and read a response
+    serialPort?.write(message, 1000)
+    Log.d("UsbConnection", "Sent a message: ${message.joinToString(" ") { "%02X".format(it) }}")
+
+    // Wait for CDI ready response
+    delay(100)
+
+    response = readFullPage(responseSize)
+    Log.d("UsbConnection", "CDI response: ${response.joinToString(" ") { "%02X".format(it) }}")
+
+    return response
+  }
+
+  /**
+   * Reads a full 64-byte page from the serial port.
+   * Handles partial reads by retrying until complete or timeout.
+   */
+  private suspend fun readFullPage(responseSize: Int): ByteArray {
+    val pageBuffer = ByteArray(responseSize)
+    var totalBytesRead = 0
+    var attempts = 0
+    val maxAttempts = 10
+    
+    while (totalBytesRead < responseSize && attempts < maxAttempts) {
+      val chunk = ByteArray(responseSize)
+      val bytesRead = serialPort?.read(chunk, 500) ?: 0
+      
+      if (bytesRead > 0) {
+        Log.d("UsbConnection", "Response bytes so far after sending a message: ${chunk.joinToString(" ") { "%02X".format(it) }}")
+        Log.d("UsbConnection", "Number of response bytes so far: $bytesRead")
+        try {
+          System.arraycopy(chunk, 0, pageBuffer, totalBytesRead, bytesRead)
+        } catch (e: ArrayIndexOutOfBoundsException) { // If the response doesn't fit in 64 bytes then it's incorrect and we have to retry
+          Log.d("UsbConnection", "Incorrect response. Bytes received so far: ${pageBuffer.joinToString(" ") { "%02X".format(it) }}")
+          Log.d("UsbConnection", "Incorrect response. Bytes received in the last (failing) loop: ${chunk.joinToString(" ") { "%02X".format(it) }}")
+          _timingMapStatus.value = "CDI not ready to accept timing map. Retrying"
+          return ByteArray(0)
+        }
+        totalBytesRead += bytesRead
+      }
+      
+      attempts++
+      if (totalBytesRead < responseSize) {
+        delay(100)
+      }
+    }
+    
+    return pageBuffer
   }
 
   fun disconnect() {

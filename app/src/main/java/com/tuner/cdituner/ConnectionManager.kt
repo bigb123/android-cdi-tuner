@@ -160,7 +160,7 @@ class ConnectionManager(private val context: Context) {
       bluetoothConnection?.let {
         observeBluetoothService()
         it.connectToDevice(deviceAddress)
-        it.startCdiCommunication()
+        it.startDataMonitor()
         
         // Save Bluetooth device to preferences
         preferences.saveBluetoothDevice(deviceAddress, deviceName)
@@ -230,8 +230,7 @@ class ConnectionManager(private val context: Context) {
         usbConnection?.readTimingMap()
       }
       ConnectionType.BLUETOOTH -> {
-        // TODO: Implement for Bluetooth when needed
-        _timingMapStatus.value = "Timing map reading not yet supported over Bluetooth"
+        bluetoothConnection?.readTimingMap()
       }
       ConnectionType.NONE -> {
         _timingMapStatus.value = "Not connected to CDI"
@@ -246,6 +245,24 @@ class ConnectionManager(private val context: Context) {
   fun refreshTimingMap() {
     _timingMap.value = null  // Clear cache
     readTimingMapIfNeeded()
+  }
+
+  /**
+   * Write the timing map to CDI.
+   * @param timingMap List of 16 TimingPoints to write
+   */
+  fun writeTimingMap(timingMap: List<TimingPoint>) {
+    when (currentConnectionType) {
+      ConnectionManager.ConnectionType.USB -> {
+        usbConnection?.writeTimingMap(timingMap)
+      }
+      ConnectionManager.ConnectionType.BLUETOOTH -> {
+        bluetoothConnection?.writeTimingMap(timingMap)
+      }
+      ConnectionManager.ConnectionType.NONE -> {
+        _timingMapStatus.value = "Not connected to CDI"
+      }
+    }
   }
 
   /**
@@ -355,6 +372,20 @@ class ConnectionManager(private val context: Context) {
         launch {
           service.receivedData.collect { data ->
             _receivedData.value = data
+          }
+        }
+
+        // Observe timing map data
+        launch {
+          service.timingMap.collect { data ->
+            _timingMap.value = data
+          }
+        }
+
+        // Observe timing map status
+        launch {
+          service.timingMapStatus.collect { status ->
+            _timingMapStatus.value = status
           }
         }
       }
