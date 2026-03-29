@@ -24,6 +24,7 @@ class MainActivity : ComponentActivity() {
 
   private lateinit var connectionManager: ConnectionManager
   private lateinit var speedProvider: SpeedProvider
+  private lateinit var dataLogger: DataLogger
   private var deviceInfo by mutableStateOf<String?>(null)
   
   // Track if the app was launched by USB attachment (to skip auto-connect from preferences)
@@ -61,6 +62,10 @@ class MainActivity : ComponentActivity() {
     
     // Initialize SpeedProvider for GPS speedometer
     speedProvider = SpeedProvider(this)
+    
+    // Initialize DataLogger for time-series logging
+    dataLogger = DataLogger(this)
+    dataLogger.loadFromFile() // Load previous session if available
 
     // Check if launched by USB attachment
     launchedByUsb = handleIntent(intent)
@@ -127,6 +132,10 @@ class MainActivity : ComponentActivity() {
     val speedKmh by speedProvider.speedKmh.collectAsState()
     val hasGpsFix by speedProvider.hasGpsFix.collectAsState()
     
+    // Data logger state
+    val logDataPoints by dataLogger.dataPoints.collectAsState()
+    val isRecording by dataLogger.isRecording.collectAsState()
+    
     // Tab state - 0 = Gauges, 1 = Timing, 2 = Logging
     var selectedTab by remember { mutableIntStateOf(0) }
     
@@ -141,6 +150,18 @@ class MainActivity : ComponentActivity() {
     LaunchedEffect(selectedTab) {
       if (selectedTab == 1) {
         connectionManager.readTimingMapIfNeeded()
+      }
+    }
+    
+    // Log data when recording and new CDI data arrives
+    LaunchedEffect(cdiData, speedKmh, isRecording) {
+      val data = cdiData // Local copy for smart cast
+      if (isRecording && data != null) {
+        dataLogger.addDataPoint(
+          rpm = data.rpm,
+          speedKmh = speedKmh,
+          timingAngle = data.timingAngle
+        )
       }
     }
 
@@ -284,27 +305,15 @@ class MainActivity : ComponentActivity() {
             )
           }
           2 -> {
-            // Logging Screen (Terminal View)
-            if (cdiData != null) {
-              TerminalView(
-                cdiReceivedMessageDecoder = cdiData,
-                modifier = Modifier.fillMaxSize()
-              )
-            } else {
-              Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-              ) {
-                Text(
-                  text = when (connectionType) {
-                    ConnectionManager.ConnectionType.NONE -> "Not connected"
-                    else -> "Waiting for CDI..."
-                  },
-                  style = MaterialTheme.typography.bodyLarge,
-                  color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-              }
-            }
+            // Logging Screen with time-series chart
+            LoggingScreen(
+              dataPoints = logDataPoints,
+              isRecording = isRecording,
+              onStartRecording = { dataLogger.startRecording() },
+              onStopRecording = { dataLogger.stopRecording() },
+              onClearData = { dataLogger.clearData() },
+              modifier = Modifier.fillMaxSize()
+            )
           }
         }
       }
