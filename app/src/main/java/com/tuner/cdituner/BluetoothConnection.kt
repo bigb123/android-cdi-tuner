@@ -228,6 +228,12 @@ class BluetoothConnection : Service() {
    */
   fun readTimingMap() {
     scope.launch {
+      // Avoid sending new messages if writing operation is still ongoing
+      while (pauseCdiCommunication) {
+        delay(100)
+        continue
+      }
+
       // Pause normal data monitoring (keeps connection alive)
       pauseCdiCommunication = true
       
@@ -248,9 +254,9 @@ class BluetoothConnection : Service() {
 
 
             // Send read timing map request
+            var pageBuffer = sendMessage(requestMessage)
 //            outputStream?.write(requestMessage)
 //            outputStream?.flush()
-            var pageBuffer = sendMessage(requestMessage)
 
             // Read page response
 //            val pageBuffer = ByteArray(CdiTimingMapProtocol.TIMING_PAGE_SIZE)
@@ -338,6 +344,11 @@ class BluetoothConnection : Service() {
    */
   fun writeTimingMap(timingMap: List<TimingPoint>) {
     scope.launch {
+      // Avoid sending new messages if reading operation is still ongoing
+      while (pauseCdiCommunication) {
+        delay(100)
+        continue
+      }
       // Pause normal data monitoring (keeps connection alive)
       pauseCdiCommunication = true
       
@@ -347,7 +358,8 @@ class BluetoothConnection : Service() {
         // Step 1: Send write init message
         _timingMapStatus.value = "Initializing write..."
         Log.d("BluetoothConnection", "Sending an init write message")
-        var response = sendMessage(CdiTimingMapProtocol.WRITE_TIMING_MAP_REQUEST)
+        sendMessage(CdiTimingMapProtocol.WRITE_TIMING_MAP_REQUEST)
+//        var response = sendMessage(CdiTimingMapProtocol.WRITE_TIMING_MAP_REQUEST)
 //        while (response[0] != 0x02.toByte() || response[1] != 0x01.toByte()) {
 //          Log.d("BluetoothConnection", "Init write message - bad response. Retrying")
 //          response = sendMessage(CdiTimingMapProtocol.WRITE_TIMING_MAP_REQUEST, CdiTimingMapProtocol.TIMING_PAGE_SIZE)
@@ -359,7 +371,8 @@ class BluetoothConnection : Service() {
         // Step 3: Send page 0
         _timingMapStatus.value = "Writing page 1/2..."
         Log.d("BluetoothConnection", "Sending first page of timing map")
-        response = sendMessage(CdiTimingMapProtocol.createPageWriteMessage(0, page0Data))
+        sendMessage(CdiTimingMapProtocol.createPageWriteMessage(0, page0Data))
+//        response = sendMessage(CdiTimingMapProtocol.createPageWriteMessage(0, page0Data))
 //        while (response[0] != 0x02.toByte() || response[1] != 0x02.toByte()) {
 //          Log.d("BluetoothConnection", "First page of timing map - bad response. Retrying")
 //          response = sendMessage(CdiTimingMapProtocol.createPageWriteMessage(0, page0Data), CdiTimingMapProtocol.TIMING_PAGE_SIZE)
@@ -368,7 +381,8 @@ class BluetoothConnection : Service() {
         // Step 4: Send page 1
         _timingMapStatus.value = "Writing page 2/2..."
         Log.d("BluetoothConnection", "Sending a second page of timing map")
-        response = sendMessage(CdiTimingMapProtocol.createPageWriteMessage(1, page1Data))
+        sendMessage(CdiTimingMapProtocol.createPageWriteMessage(1, page1Data))
+//        response = sendMessage(CdiTimingMapProtocol.createPageWriteMessage(1, page1Data))
 //        while (response[0] != 0x02.toByte() || response[1] != 0x02.toByte()) {
 //          Log.d("BluetoothConnection", "Second page of timing map - bad response. Retrying")
 //          response = sendMessage(CdiTimingMapProtocol.createPageWriteMessage(1, page1Data), CdiTimingMapProtocol.TIMING_PAGE_SIZE)
@@ -377,11 +391,16 @@ class BluetoothConnection : Service() {
         // Step 5: Send end of transmission
         _timingMapStatus.value = "Saving to CDI..."
         Log.d("BluetoothConnection", "Sending an end of transmission")
-        response = sendMessage(CdiTimingMapProtocol.END_OF_TRANSMISSION)
+        sendMessage(CdiTimingMapProtocol.END_OF_TRANSMISSION)
+//        response = sendMessage(CdiTimingMapProtocol.END_OF_TRANSMISSION)
 //        while (response[0] != 0x02.toByte() || response[1] != 0x03.toByte()) {
 //          Log.d("BluetoothConnection", "Sending timing map termination - bad response. Retrying")
 //          response = sendMessage(CdiTimingMapProtocol.END_OF_TRANSMISSION, CdiTimingMapProtocol.TIMING_PAGE_SIZE)
 //        }
+        Log.d("BluetoothConnection", "Sending a compatibility message")
+        sendMessage(CdiTimingMapProtocol.COMPATIBILITY_MESSAGE)
+        Log.d("BluetoothConnection", "Sending a second message of the end of transmission")
+        sendMessage(CdiTimingMapProtocol.END_OF_TRANSMISSION_COMPATIBILITY_MESSAGE)
 
         // Success!
         _timingMap.value = timingMap
@@ -426,10 +445,10 @@ class BluetoothConnection : Service() {
     while (totalBytesRead < responseSize && attempts < maxAttempts) {
       val chunk = ByteArray(responseSize)
       val bytesRead = readBytesWithTimeout(chunk, 500)
-      
+
+      Log.d("BluetoothConnection", "Response bytes so far after sending a message: ${chunk.joinToString(" ") { "%02X".format(it) }}")
+      Log.d("BluetoothConnection", "Number of response bytes so far: $bytesRead")
       if (bytesRead > 0) {
-        Log.d("BluetoothConnection", "Response bytes so far after sending a message: ${chunk.joinToString(" ") { "%02X".format(it) }}")
-        Log.d("BluetoothConnection", "Number of response bytes so far: $bytesRead")
         try {
           System.arraycopy(chunk, 0, pageBuffer, totalBytesRead, bytesRead)
         } catch (e: ArrayIndexOutOfBoundsException) { // If the response doesn't fit in 64 bytes then it's incorrect and we have to retry
@@ -443,10 +462,9 @@ class BluetoothConnection : Service() {
       
       attempts++
       if (totalBytesRead < responseSize) {
-        delay(100) // wait for CDI to catch up. We shouldn't flood it with request. Otherwise Bluetooth module may disconnect and power cycle is needed.
+        delay(100) // wait for CDI to catch up. We shouldn't flood it with request. Otherwise, Bluetooth module may disconnect and power cycle is needed.
       }
     }
-    
     return pageBuffer
   }
 
@@ -472,7 +490,7 @@ class BluetoothConnection : Service() {
           break
         }
       }
-      delay(10)
+      delay(100)
     }
     
     return totalBytesRead

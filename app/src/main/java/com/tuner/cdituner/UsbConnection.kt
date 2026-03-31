@@ -236,6 +236,11 @@ class UsbConnection : Service() {
    */
   fun readTimingMap() {
     scope.launch {
+      // Avoid sending new messages if writing operation is still ongoing
+      while (pauseCdiCommunication) {
+        delay(100)
+        continue
+      }
       // Pause normal data monitoring (keeps connection alive)
       pauseCdiCommunication = true
       
@@ -344,6 +349,11 @@ class UsbConnection : Service() {
    */
   fun writeTimingMap(timingMap: List<TimingPoint>) {
     scope.launch {
+      // Avoid sending new messages if reading operation is still ongoing
+      while (pauseCdiCommunication) {
+        delay(100)
+        continue
+      }
       // Pause normal data monitoring (keeps connection alive)
       pauseCdiCommunication = true
       
@@ -368,6 +378,8 @@ class UsbConnection : Service() {
         // Step 5: Send end of transmission
         _timingMapStatus.value = "Saving to CDI..."
         sendMessage(CdiTimingMapProtocol.END_OF_TRANSMISSION)
+        sendMessage(CdiTimingMapProtocol.COMPATIBILITY_MESSAGE)
+        sendMessage(CdiTimingMapProtocol.END_OF_TRANSMISSION_COMPATIBILITY_MESSAGE)
         
         // Success!
         _timingMap.value = timingMap
