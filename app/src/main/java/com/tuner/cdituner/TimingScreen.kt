@@ -344,11 +344,14 @@ fun TimingCurveGraph(
   // Store calculated point positions for hit testing
   val pointPositions = remember { mutableStateOf<List<Offset>>(emptyList()) }
   
-  // Zoom and pan state for X-axis
+  // Zoom and pan state for both axes
   // zoom: 1.0 = fit all, 2.0 = 2x zoom, etc. Max 4x zoom
   val zoomX = remember { mutableFloatStateOf(1f) }
+  val zoomY = remember { mutableFloatStateOf(1f) }
   // panX: offset in RPM units (0 = start at 0 RPM)
+  // panY: offset in timing degrees (0 = start at 0 degrees)
   val panX = remember { mutableFloatStateOf(0f) }
+  val panY = remember { mutableFloatStateOf(0f) }
   
   // Store chart dimensions for coordinate conversion in gesture handler
   val chartDimensions = remember { mutableStateOf<ChartDimensions?>(null) }
@@ -414,20 +417,33 @@ fun TimingCurveGraph(
                 val centroid = event.calculateCentroid(useCurrent = true)
                 
                 if (zoom != 1f) {
-                  // Calculate new zoom (clamp between 1x and 4x)
-                  val newZoom = (zoomX.floatValue * zoom).coerceIn(1f, 4f)
+                  // Calculate new zoom for both axes (clamp between 1x and 4x)
+                  val newZoomX = (zoomX.floatValue * zoom).coerceIn(1f, 4f)
+                  val newZoomY = (zoomY.floatValue * zoom).coerceIn(1f, 4f)
                   
-                  // Adjust pan to keep the centroid point stable
-                  val chartLeft = 8.dp.toPx()  // Must match drawing code
-                  val chartWidth = size.width - chartLeft - 8.dp.toPx()
+                  // Adjust pan to keep the centroid point stable - X axis
+                  val chartLeft = 24.dp.toPx()  // Must match drawing code
+                  val chartRight = size.width - 16.dp.toPx()
+                  val chartTop = 16.dp.toPx()
+                  val chartBottom = size.height - 36.dp.toPx()
+                  val chartWidth = chartRight - chartLeft
+                  val chartHeight = chartBottom - chartTop
+                  
                   val visibleRpmRange = maxRpm / zoomX.floatValue
                   val centroidRpm = panX.floatValue + ((centroid.x - chartLeft) / chartWidth) * visibleRpmRange
-                  
-                  val newVisibleRpmRange = maxRpm / newZoom
+                  val newVisibleRpmRange = maxRpm / newZoomX
                   val newPanX = centroidRpm - ((centroid.x - chartLeft) / chartWidth) * newVisibleRpmRange
                   
-                  zoomX.floatValue = newZoom
+                  // Adjust pan to keep the centroid point stable - Y axis
+                  val visibleTimingRange = maxTiming / zoomY.floatValue
+                  val centroidTiming = panY.floatValue + ((chartBottom - centroid.y) / chartHeight) * visibleTimingRange
+                  val newVisibleTimingRange = maxTiming / newZoomY
+                  val newPanY = centroidTiming - ((chartBottom - centroid.y) / chartHeight) * newVisibleTimingRange
+                  
+                  zoomX.floatValue = newZoomX
+                  zoomY.floatValue = newZoomY
                   panX.floatValue = newPanX.coerceIn(0f, maxRpm - newVisibleRpmRange)
+                  panY.floatValue = newPanY.coerceIn(0f, maxTiming - newVisibleTimingRange)
                 }
                 
                 event.changes.forEach { it.consume() }
@@ -455,15 +471,17 @@ fun TimingCurveGraph(
                       if (dims != null && curve.isNotEmpty()) {
                         val currentPos = change.position
                         
-                        // Convert pixel position to RPM and timing values
+                        // Convert pixel position to RPM and timing values (using zoom/pan)
                         val visibleRpmRange = maxRpm / zoomX.floatValue
                         val minVisibleRpm = panX.floatValue
+                        val visibleTimingRange = maxTiming / zoomY.floatValue
+                        val minVisibleTiming = panY.floatValue
                         
                         // Calculate new RPM from X position
                         val newRpm = minVisibleRpm + ((currentPos.x - dims.chartLeft) / dims.chartWidth) * visibleRpmRange
                         
-                        // Calculate new timing from Y position (inverted - top is higher timing)
-                        val newTiming = ((dims.chartBottom - currentPos.y) / dims.chartHeight) * maxTiming
+                        // Calculate new timing from Y position (inverted - top is higher timing, with Y zoom/pan)
+                        val newTiming = minVisibleTiming + ((dims.chartBottom - currentPos.y) / dims.chartHeight) * visibleTimingRange
                         
                         // First point (1000 RPM) and last point (16000 RPM) have fixed RPM values
                         // User can only change timing (Y-axis) for these boundary points
@@ -488,15 +506,24 @@ fun TimingCurveGraph(
                       }
                       change.consume()
                     } else {
-                      // Not dragging a point - pan the chart
-                      val chartLeft = 8.dp.toPx()  // Must match drawing code
-                      val chartWidth = size.width - chartLeft - 8.dp.toPx()
-                      val visibleRpmRange = maxRpm / zoomX.floatValue
-                      val rpmPerPixel = visibleRpmRange / chartWidth
+                      // Not dragging a point - pan the chart in both axes
+                      val chartLeft = 24.dp.toPx()  // Must match drawing code
+                      val chartRight = size.width - 16.dp.toPx()
+                      val chartTop = 16.dp.toPx()
+                      val chartBottom = size.height - 36.dp.toPx()
+                      val chartWidth = chartRight - chartLeft
+                      val chartHeight = chartBottom - chartTop
                       
-                      // Pan in opposite direction of drag
+                      val visibleRpmRange = maxRpm / zoomX.floatValue
+                      val visibleTimingRange = maxTiming / zoomY.floatValue
+                      val rpmPerPixel = visibleRpmRange / chartWidth
+                      val timingPerPixel = visibleTimingRange / chartHeight
+                      
+                      // Pan in opposite direction of drag (X and Y)
                       val newPanX = panX.floatValue - dragX * rpmPerPixel
+                      val newPanY = panY.floatValue + dragY * timingPerPixel  // Y is inverted (drag up = increase timing)
                       panX.floatValue = newPanX.coerceIn(0f, maxRpm - visibleRpmRange)
+                      panY.floatValue = newPanY.coerceIn(0f, maxTiming - visibleTimingRange)
                       
                       change.consume()
                     }
@@ -554,14 +581,23 @@ fun TimingCurveGraph(
         chartHeight = chartHeight
       )
       
-      // Calculate visible RPM range based on zoom
+      // Calculate visible ranges based on zoom for both axes
       val visibleRpmRange = maxRpm / zoomX.floatValue
       val minVisibleRpm = panX.floatValue
       val maxVisibleRpm = minVisibleRpm + visibleRpmRange
       
+      val visibleTimingRange = maxTiming / zoomY.floatValue
+      val minVisibleTiming = panY.floatValue
+      val maxVisibleTiming = minVisibleTiming + visibleTimingRange
+      
       // Helper function to convert RPM to X coordinate
       fun rpmToX(rpm: Float): Float {
         return chartLeft + ((rpm - minVisibleRpm) / visibleRpmRange) * chartWidth
+      }
+      
+      // Helper function to convert timing degrees to Y coordinate
+      fun timingToY(timing: Float): Float {
+        return chartBottom - ((timing - minVisibleTiming) / visibleTimingRange) * chartHeight
       }
 
       // Draw grid lines - dynamically adjust based on zoom level
@@ -570,7 +606,11 @@ fun TimingCurveGraph(
         zoomX.floatValue >= 2f -> 1000
         else -> 2000
       }
-      val timingSteps = listOf(0f, 10f, 20f, 30f, 40f, 50f)
+      val timingStep = when {
+        zoomY.floatValue >= 3f -> 2
+        zoomY.floatValue >= 2f -> 5
+        else -> 10
+      }
 
       // Vertical grid lines (RPM) - only draw visible ones
       var rpm = ((minVisibleRpm / rpmStep).toInt() * rpmStep)
@@ -597,25 +637,29 @@ fun TimingCurveGraph(
         rpm += rpmStep
       }
 
-      // Horizontal grid lines (Timing) - these don't change with zoom
-      timingSteps.forEach { timing ->
-        val y = chartBottom - (timing / maxTiming) * chartHeight
-        drawLine(
-          color = gridColor,
-          start = Offset(chartLeft, y),
-          end = Offset(chartRight, y),
-          strokeWidth = 1.dp.toPx()
-        )
-        // Timing labels
-        val label = "${timing.toInt()}°"
-        val textLayoutResult = textMeasurer.measure(
-          text = label,
-          style = TextStyle(fontSize = 10.sp, color = textColor)
-        )
-        drawText(
-          textLayoutResult = textLayoutResult,
-          topLeft = Offset(chartLeft - textLayoutResult.size.width - 8.dp.toPx(), y - textLayoutResult.size.height / 2)
-        )
+      // Horizontal grid lines (Timing) - dynamically adjust based on Y zoom
+      var timing = ((minVisibleTiming / timingStep).toInt() * timingStep)
+      while (timing <= maxVisibleTiming) {
+        val y = timingToY(timing.toFloat())
+        if (y >= chartTop && y <= chartBottom) {
+          drawLine(
+            color = gridColor,
+            start = Offset(chartLeft, y),
+            end = Offset(chartRight, y),
+            strokeWidth = 1.dp.toPx()
+          )
+          // Timing labels
+          val label = "${timing}°"
+          val textLayoutResult = textMeasurer.measure(
+            text = label,
+            style = TextStyle(fontSize = 10.sp, color = textColor)
+          )
+          drawText(
+            textLayoutResult = textLayoutResult,
+            topLeft = Offset(chartLeft - textLayoutResult.size.width - 8.dp.toPx(), y - textLayoutResult.size.height / 2)
+          )
+        }
+        timing += timingStep
       }
 
       // Draw axes
@@ -642,7 +686,7 @@ fun TimingCurveGraph(
 
         timingCurve.forEach { point ->
           val x = rpmToX(point.rpm.toFloat())
-          val y = chartBottom - (point.timingDegrees / maxTiming) * chartHeight
+          val y = timingToY(point.timingDegrees)
           positions.add(Offset(x, y))
 
           if (isFirst) {
@@ -656,7 +700,7 @@ fun TimingCurveGraph(
         // Store positions for hit testing in pointerInput
         pointPositions.value = positions
 
-        // Clip the curve and points to the chart area (prevents overlapping Y-axis when zoomed)
+        // Clip the curve and points to the chart area (prevents overlapping axes when zoomed)
         clipRect(
           left = chartLeft,
           top = chartTop,
@@ -670,10 +714,12 @@ fun TimingCurveGraph(
             style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
           )
 
-          // Draw data points (only visible ones)
+          // Draw data points (only visible ones in both X and Y)
           positions.forEachIndexed { index, offset ->
-            // Only draw points that are within the visible area
-            if (offset.x >= chartLeft - 10.dp.toPx() && offset.x <= chartRight + 10.dp.toPx()) {
+            // Only draw points that are within the visible area (both X and Y)
+            val inXRange = offset.x >= chartLeft - 10.dp.toPx() && offset.x <= chartRight + 10.dp.toPx()
+            val inYRange = offset.y >= chartTop - 10.dp.toPx() && offset.y <= chartBottom + 10.dp.toPx()
+            if (inXRange && inYRange) {
               val isSelected = selectedIndex == index
               
               // Outer circle (larger when selected)
@@ -693,9 +739,11 @@ fun TimingCurveGraph(
         }
       }
 
-      // Draw zoom indicator if zoomed in
-      if (zoomX.floatValue > 1.01f) {
-        val zoomText = "%.1fx".format(zoomX.floatValue)
+      // Draw zoom indicator if zoomed in (show both X and Y zoom)
+      val isZoomedX = zoomX.floatValue > 1.01f
+      val isZoomedY = zoomY.floatValue > 1.01f
+      if (isZoomedX || isZoomedY) {
+        val zoomText = "%.1fx".format(zoomX.floatValue.coerceAtLeast(zoomY.floatValue))
         val zoomTextLayout = textMeasurer.measure(
           text = zoomText,
           style = TextStyle(fontSize = 12.sp, color = textColor.copy(alpha = 0.7f))

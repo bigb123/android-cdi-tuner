@@ -13,10 +13,10 @@ package com.tuner.cdituner
  * WRITE Protocol:
  * 1. Send write init: 01 01 00 00 ... 02 A8 (64 bytes) - tells CDI we want to write
  * 2. CDI responds: 02 01 00 00 ... 03 A9 (64 bytes) - CDI ready to accept
- * 3. Send page 0: 01 02 00 00 [data...] [checksum] A8 (64 bytes)
- * 4. CDI echoes: 02 02 00 00 [data...] [checksum] A9 (64 bytes)
- * 5. Send page 1: 01 02 00 01 [data...] [checksum] A8 (64 bytes)
- * 6. CDI echoes: 02 02 00 01 [data...] [checksum] A9 (64 bytes)
+ * 3. Send page 0: 01 02 00 00 data... [checksum] A8 (64 bytes)
+ * 4. CDI echoes: 02 02 00 00 data... [checksum] A9 (64 bytes)
+ * 5. Send page 1: 01 02 00 01 data... [checksum] A8 (64 bytes)
+ * 6. CDI echoes: 02 02 00 01 data... [checksum] A9 (64 bytes)
  * 7. Send end of transmission: 01 03 F4 B2 F8 9E ... 40 A8 (64 bytes)
  * 8. CDI confirms save: 02 03 00 00 ... 05 A9 (64 bytes)
  *
@@ -65,6 +65,28 @@ object CdiTimingMapProtocol {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0xa8.toByte()
   )
 
+  // This message is most probably necessary for compatibility but doesn't do much
+  val COMPATIBILITY_MESSAGE = byteArrayOf(
+    0x01, 0x04, 0x00, 0x00, 0xe8.toByte(), 0x03, 0xd0.toByte(), 0x07,
+    0xb8.toByte(), 0x0b, 0xa0.toByte(), 0x0f, 0x88.toByte(), 0x13, 0x70, 0x17,
+    0x58, 0x1b, 0x40, 0x1f, 0x28, 0x23, 0x10, 0x27,
+    0xf8.toByte(), 0x2a, 0xe0.toByte(), 0x2e, 0xc8.toByte(), 0x32, 0xb0.toByte(), 0x36,
+    0x98.toByte(), 0x3a, 0x80.toByte(), 0x3e, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x4f, 0xa8.toByte()
+  )
+
+  val END_OF_TRANSMISSION_COMPATIBILITY_MESSAGE = byteArrayOf(
+    0x01, 0x05, 0xf4.toByte(), 0xb2.toByte(), 0xf9.toByte(), 0x9f.toByte(), 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x44, 0xa8.toByte())
+
   /** Expected page size in bytes */
   const val TIMING_PAGE_SIZE = 64
   const val STATUS_PAGE_SIZE = 22
@@ -85,12 +107,12 @@ object CdiTimingMapProtocol {
    * @param page The 64-byte page data
    * @return true if valid CDI response page
    */
-  fun isValidPage(page: ByteArray): Boolean {
-    return page.size == TIMING_PAGE_SIZE &&
-           page[0] == 0x02.toByte() && 
-           page[1] == 0x07.toByte() &&
-           page[63] == 0xB9.toByte()
-  }
+//  fun isValidPage(page: ByteArray): Boolean {
+//    return page.size == TIMING_PAGE_SIZE &&
+//           page[0] == 0x02.toByte() &&
+//           page[1] == 0x07.toByte() &&
+//           page[63] == 0xB9.toByte()
+//  }
 
   /**
    * Creates acknowledgment message to request next page.
