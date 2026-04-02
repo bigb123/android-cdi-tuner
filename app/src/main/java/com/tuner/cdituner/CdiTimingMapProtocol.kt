@@ -288,4 +288,104 @@ object CdiTimingMapProtocol {
     object Success : WriteResult()
     data class Error(val message: String, val step: String) : WriteResult()
   }
+
+  // ==================== SHARED READ OPERATION ====================
+
+  /**
+   * Reads timing map data from CDI using the provided sendMessage function.
+   * This is the shared implementation used by both USB and Bluetooth connections.
+   *
+   * @param sendMessage Suspend function that sends a message and returns the response
+   * @param onStatus Callback to report progress status
+   * @return List of TimingPoints, or null if parsing fails
+   */
+  suspend fun readTimingMapData(
+    sendMessage: suspend (ByteArray) -> ByteArray,
+    onStatus: (String) -> Unit
+  ): List<TimingPoint>? {
+    val timingMapBytes = ByteArray(USEFUL_DATA_SIZE * PAGES_TO_READ)
+    var requestMessage = READ_TIMING_MAP_REQUEST
+
+    for (pageNum in 0 until PAGES_TO_READ) {
+      onStatus("Reading page ${pageNum + 1}/$PAGES_TO_READ...")
+
+      // Retry until we get a valid response (starts with 02 07)
+      var pageBuffer = sendMessage(requestMessage)
+      while (pageBuffer[0] != 0x02.toByte() || pageBuffer[1] != 0x07.toByte()) {
+        pageBuffer = sendMessage(requestMessage)
+      }
+
+      // Copy page data (skip 4-byte header, ignore 2-byte footer)
+      System.arraycopy(
+        pageBuffer, 4,
+        timingMapBytes, pageNum * USEFUL_DATA_SIZE,
+        USEFUL_DATA_SIZE
+      )
+
+      // Create acknowledgment message to request next page
+      requestMessage = createAcknowledgeMessage(pageBuffer)
+    }
+
+    return parseTimingMap(timingMapBytes)
+  }
+
+  // ==================== SHARED WRITE OPERATION ====================
+
+  /**
+   * Writes timing map data to CDI using the provided sendMessage function.
+   * This is the shared implementation used by both USB and Bluetooth connections.
+   * Uses the more robust Bluetooth approach with response validation and retries.
+   *
+   * @param timingMap List of 16 TimingPoints to write
+   * @param sendMessage Suspend function that sends a message and returns the response
+   * @param onStatus Callback to report progress status
+   */
+  suspend fun writeTimingMapData(
+    timingMap: List<TimingPoint>,
+    sendMessage: suspend (ByteArray) -> ByteArray,
+    onStatus: (String) -> Unit
+  ) {
+    // Step 1: Send write init message
+    onStatus("Initializing write...")
+    var response = sendMessage(WRITE_TIMING_MAP_REQUEST)
+    while (response[0] != 0x02.toByte() || response[1] != 0x01.toByte()) {
+      response = sendMessage(WRITE_TIMING_MAP_REQUEST)
+    }
+
+    // Step 2: Convert timing map to page data
+    val (page0Data, page1Data) = timingMapToPageData(timingMap)
+
+    // Step 3: Send page 0
+    onStatus("Writing page 1/2...")
+    response = sendMessage(createPageWriteMessage(0, page0Data))
+    while (response[0] != 0x02.toByte() || response[1] != 0x02.toByte()) {
+      response = sendMessage(createPageWriteMessage(0, page0Data))
+    }
+
+    // Step 4: Send page 1
+    onStatus("Writing page 2/2...")
+    response = sendMessage(createPageWriteMessage(1, page1Data))
+    while (response[0] != 0x02.toByte() || response[1] != 0x02.toByte()) {
+      response = sendMessage(createPageWriteMessage(1, page1Data))
+    }
+
+    // Step 5: Send end of transmission
+    onStatus("Saving to CDI...")
+    response = sendMessage(END_OF_TRANSMISSION)
+    while (response[0] != 0x02.toByte() || response[1] != 0x03.toByte()) {
+      response = sendMessage(END_OF_TRANSMISSION)
+    }
+
+    // Step 6: Send compatibility message
+    response = sendMessage(COMPATIBILITY_MESSAGE)
+    while (response[0] != 0x02.toByte() || response[1] != 0x04.toByte()) {
+      response = sendMessage(COMPATIBILITY_MESSAGE)
+    }
+
+    // Step 7: Send end of transmission compatibility message
+    response = sendMessage(END_OF_TRANSMISSION_COMPATIBILITY_MESSAGE)
+    while (response[0] != 0x02.toByte() || response[1] != 0x05.toByte()) {
+      response = sendMessage(END_OF_TRANSMISSION_COMPATIBILITY_MESSAGE)
+    }
+  }
 }

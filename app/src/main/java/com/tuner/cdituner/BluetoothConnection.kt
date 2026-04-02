@@ -225,41 +225,18 @@ class BluetoothConnection : Service() {
       _timingMapStatus.value = "Reading timing map..."
 
       try {
-          val timingMapBytes = ByteArray(CdiTimingMapProtocol.USEFUL_DATA_SIZE * CdiTimingMapProtocol.PAGES_TO_READ)
+        // Use shared protocol implementation
+        val timingMap = CdiTimingMapProtocol.readTimingMapData(
+          sendMessage = { message -> sendMessage(message) },
+          onStatus = { status -> _timingMapStatus.value = status }
+        )
 
-          var requestMessage = CdiTimingMapProtocol.READ_TIMING_MAP_REQUEST // Message content will get updated in the loop
-          
-          // Read pages
-          for (pageNum in 0 until CdiTimingMapProtocol.PAGES_TO_READ) {
-
-            _timingMapStatus.value = "Reading page ${pageNum + 1}/${CdiTimingMapProtocol.PAGES_TO_READ}..."
-
-
-            // Send read timing map request
-            // Retry send request for ignition table if received message doesn't match the pattern
-            var pageBuffer = sendMessage(requestMessage)
-            while (pageBuffer[0] != 0x02.toByte() || pageBuffer[1] != 0x07.toByte()) {
-              Log.d("BluetoothConnection", "Wrong response: ${pageBuffer.joinToString(" ") { "%02X".format(it) }}")
-              pageBuffer = sendMessage(requestMessage)
-            }
-
-            Log.d("BluetoothConnection", "This reading should be correct. pageBuffer: ${pageBuffer.joinToString(" ") { "%02X".format(it) }}")
-            // Load page without header (first 4 bytes) and footer (last 2 bytes) to timing map array
-            System.arraycopy(pageBuffer, 4, timingMapBytes, pageNum * CdiTimingMapProtocol.USEFUL_DATA_SIZE, CdiTimingMapProtocol.USEFUL_DATA_SIZE)
-
-            // Set a message request to retrieve next page
-            requestMessage = CdiTimingMapProtocol.createAcknowledgeMessage(pageBuffer)
-            Log.d("BluetoothConnection", "Pages content so far: ${timingMapBytes.joinToString(" ") { "%02X".format(it) }}")
-          }
-
-          // Parse the timing map
-          val timingMap = CdiTimingMapProtocol.parseTimingMap(timingMapBytes)
-          if (timingMap != null) {
-            _timingMap.value = timingMap
-            _timingMapStatus.value = "Timing map loaded (${timingMap.size} points)"
-          } else {
-            _timingMapStatus.value = "Failed to parse timing map"
-          }
+        if (timingMap != null) {
+          _timingMap.value = timingMap
+          _timingMapStatus.value = "Timing map loaded (${timingMap.size} points)"
+        } else {
+          _timingMapStatus.value = "Failed to parse timing map"
+        }
           
       } catch (e: IOException) {
         _timingMapStatus.value = "Error reading timing map: ${e.message}"
@@ -297,60 +274,12 @@ class BluetoothConnection : Service() {
       _timingMapStatus.value = "Writing timing map..."
 
       try {
-        // Step 1: Send write init message
-        _timingMapStatus.value = "Initializing write..."
-        Log.d("BluetoothConnection", "Sending an init write message")
-//        sendMessage(CdiTimingMapProtocol.WRITE_TIMING_MAP_REQUEST)
-        var response = sendMessage(CdiTimingMapProtocol.WRITE_TIMING_MAP_REQUEST)
-        while (response[0] != 0x02.toByte() || response[1] != 0x01.toByte()) {
-          Log.d("BluetoothConnection", "Init write message - bad response. Retrying")
-          response = sendMessage(CdiTimingMapProtocol.WRITE_TIMING_MAP_REQUEST)
-        }
-        
-        // Step 2: Convert timing map to page data
-        val (page0Data, page1Data) = CdiTimingMapProtocol.timingMapToPageData(timingMap)
-        
-        // Step 3: Send page 0
-        _timingMapStatus.value = "Writing page 1/2..."
-        Log.d("BluetoothConnection", "Sending first page of timing map")
-//        sendMessage(CdiTimingMapProtocol.createPageWriteMessage(0, page0Data))
-        response = sendMessage(CdiTimingMapProtocol.createPageWriteMessage(0, page0Data))
-        while (response[0] != 0x02.toByte() || response[1] != 0x02.toByte()) {
-          Log.d("BluetoothConnection", "First page of timing map - bad response. Retrying")
-          response = sendMessage(CdiTimingMapProtocol.createPageWriteMessage(0, page0Data), CdiTimingMapProtocol.TIMING_PAGE_SIZE)
-        }
-
-        // Step 4: Send page 1
-        _timingMapStatus.value = "Writing page 2/2..."
-        Log.d("BluetoothConnection", "Sending a second page of timing map")
-//        sendMessage(CdiTimingMapProtocol.createPageWriteMessage(1, page1Data))
-        response = sendMessage(CdiTimingMapProtocol.createPageWriteMessage(1, page1Data))
-        while (response[0] != 0x02.toByte() || response[1] != 0x02.toByte()) {
-          Log.d("BluetoothConnection", "Second page of timing map - bad response. Retrying")
-          response = sendMessage(CdiTimingMapProtocol.createPageWriteMessage(1, page1Data))
-        }
-        
-        // Step 5: Send end of transmission
-        _timingMapStatus.value = "Saving to CDI..."
-        Log.d("BluetoothConnection", "Sending an end of transmission")
-//        sendMessage(CdiTimingMapProtocol.END_OF_TRANSMISSION)
-        response = sendMessage(CdiTimingMapProtocol.END_OF_TRANSMISSION)
-        while (response[0] != 0x02.toByte() || response[1] != 0x03.toByte()) {
-          Log.d("BluetoothConnection", "Sending timing map termination - bad response. Retrying")
-          response = sendMessage(CdiTimingMapProtocol.END_OF_TRANSMISSION)
-        }
-
-        Log.d("BluetoothConnection", "Sending a compatibility message")
-        response = sendMessage(CdiTimingMapProtocol.COMPATIBILITY_MESSAGE)
-        while (response[0] != 0x02.toByte() || response[1] != 0x04.toByte()) {
-          response = sendMessage(CdiTimingMapProtocol.COMPATIBILITY_MESSAGE)
-        }
-
-        Log.d("BluetoothConnection", "Sending a second message of the end of transmission")
-        response = sendMessage(CdiTimingMapProtocol.END_OF_TRANSMISSION_COMPATIBILITY_MESSAGE)
-        while (response[0] != 0x02.toByte() || response[1] != 0x05.toByte()) {
-          response = sendMessage(CdiTimingMapProtocol.END_OF_TRANSMISSION_COMPATIBILITY_MESSAGE)
-        }
+        // Use shared protocol implementation
+        CdiTimingMapProtocol.writeTimingMapData(
+          timingMap = timingMap,
+          sendMessage = { message -> sendMessage(message) },
+          onStatus = { status -> _timingMapStatus.value = status }
+        )
 
         // Success!
         _timingMap.value = timingMap
