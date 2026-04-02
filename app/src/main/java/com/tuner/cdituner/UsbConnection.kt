@@ -257,36 +257,12 @@ class UsbConnection : Service() {
       _timingMapStatus.value = "Reading timing map..."
 
       try {
-        val timingMapBytes = ByteArray(CdiTimingMapProtocol.USEFUL_DATA_SIZE * CdiTimingMapProtocol.PAGES_TO_READ)
+        // Use shared protocol implementation
+        val timingMap = CdiTimingMapProtocol.readTimingMapData(
+          sendMessage = { message -> sendMessage(message) },
+          onStatus = { status -> _timingMapStatus.value = status }
+        )
 
-        var requestMessage = CdiTimingMapProtocol.READ_TIMING_MAP_REQUEST // Request message content will get updated in the loop below
-        
-        // Read pages
-        for (pageNum in 0 until CdiTimingMapProtocol.PAGES_TO_READ) {
-
-          _timingMapStatus.value = "Reading page ${pageNum + 1}/${CdiTimingMapProtocol.PAGES_TO_READ}..."
-          Log.d("UsbConnection", "Reading page ${pageNum + 1}/${CdiTimingMapProtocol.PAGES_TO_READ}...")
-
-
-          // Read page response
-          // Retry send request for ignition table if received message doesn't match the pattern
-          var pageBuffer = sendMessage(requestMessage)
-          while (pageBuffer[0] != 0x02.toByte() || pageBuffer[1] != 0x07.toByte()) {
-            Log.d("UsbConnection", "Wrong response: ${pageBuffer.joinToString(" ") { "%02X".format(it) }}")
-            pageBuffer = sendMessage(requestMessage)
-          }
-
-          Log.d("UsbConnection", "This reading should be correct. pageBuffer: ${pageBuffer.joinToString(" ") { "%02X".format(it) }}")
-          // Load page without header (first 4 bytes) and footer (last 2 bytes) to timing map array
-          System.arraycopy(pageBuffer, 4, timingMapBytes, pageNum * CdiTimingMapProtocol.USEFUL_DATA_SIZE, CdiTimingMapProtocol.USEFUL_DATA_SIZE)
-
-          // Set a message request to retrieve next page
-          requestMessage = CdiTimingMapProtocol.createAcknowledgeMessage(pageBuffer)
-          Log.d("UsbConnection", "Pages content so far: ${timingMapBytes.joinToString(" ") { "%02X".format(it) }}")
-        }
-
-        // Parse the timing map
-        val timingMap = CdiTimingMapProtocol.parseTimingMap(timingMapBytes)
         if (timingMap != null) {
           _timingMap.value = timingMap
           _timingMapStatus.value = "Timing map loaded (${timingMap.size} points)"
@@ -329,26 +305,12 @@ class UsbConnection : Service() {
       _timingMapStatus.value = "Writing timing map..."
 
       try {
-        // Step 1: Send write init message
-        _timingMapStatus.value = "Initializing write..."
-        var response = sendMessage(CdiTimingMapProtocol.WRITE_TIMING_MAP_REQUEST) // we should verify response here
-        
-        // Step 2: Convert timing map to page data
-        val (page0Data, page1Data) = CdiTimingMapProtocol.timingMapToPageData(timingMap)
-        
-        // Step 3: Send page 0
-        _timingMapStatus.value = "Writing page 1/2..."
-        sendMessage(CdiTimingMapProtocol.createPageWriteMessage(0, page0Data))
-
-        // Step 4: Send page 1
-        _timingMapStatus.value = "Writing page 2/2..."
-        sendMessage(CdiTimingMapProtocol.createPageWriteMessage(1, page1Data))
-        
-        // Step 5: Send end of transmission
-        _timingMapStatus.value = "Saving to CDI..."
-        sendMessage(CdiTimingMapProtocol.END_OF_TRANSMISSION)
-        sendMessage(CdiTimingMapProtocol.COMPATIBILITY_MESSAGE)
-        sendMessage(CdiTimingMapProtocol.END_OF_TRANSMISSION_COMPATIBILITY_MESSAGE)
+        // Use shared protocol implementation
+        CdiTimingMapProtocol.writeTimingMapData(
+          timingMap = timingMap,
+          sendMessage = { message -> sendMessage(message) },
+          onStatus = { status -> _timingMapStatus.value = status }
+        )
         
         // Success!
         _timingMap.value = timingMap
