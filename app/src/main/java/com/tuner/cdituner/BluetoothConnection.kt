@@ -162,11 +162,7 @@ class BluetoothConnection : Service() {
               continue
             }
             else {
-              var response = sendMessage(CdiMessageProcessing.CDI_MESSAGE, CdiTimingMapProtocol.STATUS_PAGE_SIZE)
-              while (response[0] != 0x03.toByte()) {
-                response = sendMessage(CdiMessageProcessing.CDI_MESSAGE, CdiTimingMapProtocol.STATUS_PAGE_SIZE)
-              }
-
+              val response = sendMessage(CdiMessageProcessing.STATUS_MESSAGE, byteArrayOf(0x03.toByte()), CdiTimingMapProtocol.STATUS_PAGE_SIZE)
               packetCount = CdiMessageProcessing.processMessage(response, 0, packetCount, _receivedData, _connectionStatus)
             }
           }
@@ -223,7 +219,7 @@ class BluetoothConnection : Service() {
       try {
         // Use shared protocol implementation
         val timingMap = CdiTimingMapProtocol.readTimingMapData(
-          sendMessage = { message -> sendMessage(message) },
+          sendMessage = { message, expectedHeader -> sendMessage(message, expectedHeader) },
           onStatus = { status -> _timingMapStatus.value = status }
         )
 
@@ -273,7 +269,7 @@ class BluetoothConnection : Service() {
         // Use shared protocol implementation
         CdiTimingMapProtocol.writeTimingMapData(
           timingMap = timingMap,
-          sendMessage = { message -> sendMessage(message) },
+          sendMessage = { message, expectedHeader -> sendMessage(message, expectedHeader) },
           onStatus = { status -> _timingMapStatus.value = status }
         )
 
@@ -290,22 +286,29 @@ class BluetoothConnection : Service() {
     }
   }
 
-  private suspend fun sendMessage(message: ByteArray, responseSize: Int = CdiTimingMapProtocol.TIMING_PAGE_SIZE): ByteArray {
+  private suspend fun sendMessage(message: ByteArray, expectedHeader: ByteArray, responseSize: Int = CdiTimingMapProtocol.TIMING_PAGE_SIZE): ByteArray {
     // Mutex ensures only one sendMessage can run at a time
     // This prevents message/response mismatch when multiple coroutines try to communicate
     return sendMessageMutex.withLock {
-      // Send message
-      outputStream?.write(message)
-      outputStream?.flush()
+
       Log.d("BluetoothConnection", "Sent a message: ${message.joinToString(" ") { "%02X".format(it) }}")
+      var response = ByteArray(0)
+
+      // Send a message and expect a response. If response header is wrong - retry sending a message
+      while (response.isEmpty()) {
+        // Send message
+        outputStream?.write(message)
+        outputStream?.flush()
+        Log.d("BluetoothConnection", "Incorrect response. Sent a message again: ${message.joinToString(" ") { "%02X".format(it) }}")
 
         // Wait for CDI to catch up
         delay(CdiTimingMapProtocol.WAIT)
 
-      // read a response
-      val response = readFullPage(responseSize)
-      Log.d("BluetoothConnection", "CDI response: ${response.joinToString(" ") { "%02X".format(it) }}")
+        // read a response
+        response = readFullPage(responseSize, expectedHeader)
+      }
 
+      Log.d("BluetoothConnection", "CDI response: ${response.joinToString(" ") { "%02X".format(it) }}")
       response
     }
   }
@@ -314,7 +317,7 @@ class BluetoothConnection : Service() {
    * Reads a full 64-byte page from the Bluetooth input stream.
    * Handles partial reads by retrying until complete or timeout.
    */
-  private suspend fun readFullPage(responseSize: Int): ByteArray {
+  private suspend fun readFullPage(responseSize: Int, expectedHeader: ByteArray): ByteArray {
     val pageBuffer = ByteArray(responseSize)
     var totalBytesRead = 0
     var attempts = 0
@@ -323,6 +326,11 @@ class BluetoothConnection : Service() {
     while (totalBytesRead < responseSize && attempts < maxAttempts) {
       val chunk = ByteArray(responseSize)
       val bytesRead = readBytesWithTimeout(chunk, 500)
+
+      // If header doesn't match let's return an empty array to allow for retry.
+      // That should speed up the fail-and-retry process.
+      if (attempts == 0 && bytesRead > 0 && !expectedHeader.contentEquals(chunk.copyOfRange(0, expectedHeader.size)))
+        return ByteArray(0)
 
       Log.d("BluetoothConnection", "Response bytes so far after sending a message: ${chunk.joinToString(" ") { "%02X".format(it) }}")
       Log.d("BluetoothConnection", "Number of response bytes so far: $bytesRead")

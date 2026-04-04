@@ -43,6 +43,31 @@ object CdiTimingMapProtocol {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x07, 0xB8.toByte()
   )
 
+  val READ_TIMING_MAP_END_OF_TRANSMISSION = byteArrayOf(
+    0x01, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x09, 0xb8.toByte()
+  )
+
+  val READ_TIMING_MAP_COMPATIBILITY_MESSAGE = byteArrayOf(
+    0x01, 0x09, 0x00, 0x00, 0xe8.toByte(), 0x03, 0xd0.toByte(), 0x07,
+    0xb8.toByte(), 0x0b, 0xa0.toByte(), 0x0f, 0x88.toByte(), 0x13, 0x70, 0x17,
+    0x58, 0x1b, 0x40, 0x1f, 0x28, 0x23, 0x10, 0x27,
+    0xf8.toByte(), 0x2a, 0xe0.toByte(), 0x2e.toByte(), 0xc8.toByte(), 0x32, 0xb0.toByte(), 0x36,
+    0x98.toByte(), 0x3a, 0x80.toByte(), 0x3e, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x54, 0xb8.toByte()
+  )
+
+//  val READ_TIMING_MAP_END_OF_TRANSMISSION_COMPATIBILITY_MESSAGE = byteArrayOf(
+//
+//  )
   val WRITE_TIMING_MAP_REQUEST = byteArrayOf(
     0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -54,7 +79,7 @@ object CdiTimingMapProtocol {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xa8.toByte()
   )
 
-  val END_OF_TRANSMISSION = byteArrayOf(
+  val WRITE_TIMING_MAP_END_OF_TRANSMISSION = byteArrayOf(
     0x01, 0x03, 0xf4.toByte(), 0xb2.toByte(), 0xf8.toByte(), 0x9e.toByte(), 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -66,7 +91,7 @@ object CdiTimingMapProtocol {
   )
 
   // This message is most probably necessary for compatibility but doesn't do much
-  val COMPATIBILITY_MESSAGE = byteArrayOf(
+  val WRITE_TIMING_MAP_COMPATIBILITY_MESSAGE = byteArrayOf(
     0x01, 0x04, 0x00, 0x00, 0xe8.toByte(), 0x03, 0xd0.toByte(), 0x07,
     0xb8.toByte(), 0x0b, 0xa0.toByte(), 0x0f, 0x88.toByte(), 0x13, 0x70, 0x17,
     0x58, 0x1b, 0x40, 0x1f, 0x28, 0x23, 0x10, 0x27,
@@ -77,7 +102,7 @@ object CdiTimingMapProtocol {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x4f, 0xa8.toByte()
   )
 
-  val END_OF_TRANSMISSION_COMPATIBILITY_MESSAGE = byteArrayOf(
+  val WRITE_TIMING_MAP_END_OF_TRANSMISSION_COMPATIBILITY_MESSAGE = byteArrayOf(
     0x01, 0x05, 0xf4.toByte(), 0xb2.toByte(), 0xf9.toByte(), 0x9f.toByte(), 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -305,7 +330,7 @@ object CdiTimingMapProtocol {
    * @return List of TimingPoints, or null if parsing fails
    */
   suspend fun readTimingMapData(
-    sendMessage: suspend (ByteArray) -> ByteArray,
+    sendMessage: suspend (ByteArray, ByteArray) -> ByteArray,
     onStatus: (String) -> Unit
   ): List<TimingPoint>? {
     val timingMapBytes = ByteArray(USEFUL_DATA_SIZE * PAGES_TO_READ)
@@ -315,10 +340,10 @@ object CdiTimingMapProtocol {
       onStatus("Reading page ${pageNum + 1}/$PAGES_TO_READ...")
 
       // Retry until we get a valid response (starts with 02 07)
-      var pageBuffer = sendMessage(requestMessage)
-      while (pageBuffer[0] != 0x02.toByte() || pageBuffer[1] != 0x07.toByte()) {
-        pageBuffer = sendMessage(requestMessage)
-      }
+      var pageBuffer = sendMessage(requestMessage, byteArrayOf(0x02.toByte(), 0x07.toByte()))
+//      while (pageBuffer[0] != 0x02.toByte() || pageBuffer[1] != 0x07.toByte()) {
+//        pageBuffer = sendMessage(requestMessage)
+//      }
 
       // Copy page data (skip 4-byte header, ignore 2-byte footer)
       System.arraycopy(
@@ -326,6 +351,7 @@ object CdiTimingMapProtocol {
         timingMapBytes, pageNum * USEFUL_DATA_SIZE,
         USEFUL_DATA_SIZE
       )
+      sendMessage(READ_TIMING_MAP_END_OF_TRANSMISSION, byteArrayOf(0x02.toByte(), 0x08.toByte()))
 
       // Create acknowledgment message to request next page
       requestMessage = createAcknowledgeMessage(pageBuffer)
@@ -342,55 +368,59 @@ object CdiTimingMapProtocol {
    * Uses the more robust Bluetooth approach with response validation and retries.
    *
    * @param timingMap List of 16 TimingPoints to write
-   * @param sendMessage Suspend function that sends a message and returns the response
+   * @param sendMessage Suspend function that sends a message and expected header, returns the response
    * @param onStatus Callback to report progress status
    */
   suspend fun writeTimingMapData(
     timingMap: List<TimingPoint>,
-    sendMessage: suspend (ByteArray) -> ByteArray,
+    sendMessage: suspend (ByteArray, ByteArray) -> ByteArray,
     onStatus: (String) -> Unit
   ) {
     // Step 1: Send write init message
     onStatus("Initializing write...")
-    var response = sendMessage(WRITE_TIMING_MAP_REQUEST)
-    while (response[0] != 0x02.toByte() || response[1] != 0x01.toByte()) {
-      response = sendMessage(WRITE_TIMING_MAP_REQUEST)
-    }
+    var response = sendMessage(WRITE_TIMING_MAP_REQUEST, byteArrayOf(0x02.toByte(), 0x01.toByte()))
+//    while (response[0] != 0x02.toByte() || response[1] != 0x01.toByte()) {
+//      response = sendMessage(WRITE_TIMING_MAP_REQUEST, initHeader)
+//    }
 
     // Step 2: Convert timing map to page data
     val (page0Data, page1Data) = timingMapToPageData(timingMap)
 
     // Step 3: Send page 0
     onStatus("Writing page 1/2...")
-    response = sendMessage(createPageWriteMessage(0, page0Data))
-    while (response[0] != 0x02.toByte() || response[1] != 0x02.toByte()) {
-      response = sendMessage(createPageWriteMessage(0, page0Data))
-    }
+//    val pageHeader = byteArrayOf(0x02.toByte(), 0x02.toByte())
+    response = sendMessage(createPageWriteMessage(0, page0Data), byteArrayOf(0x02.toByte(), 0x02.toByte()))
+//    while (response[0] != 0x02.toByte() || response[1] != 0x02.toByte()) {
+//      response = sendMessage(createPageWriteMessage(0, page0Data), pageHeader)
+//    }
 
     // Step 4: Send page 1
     onStatus("Writing page 2/2...")
-    response = sendMessage(createPageWriteMessage(1, page1Data))
-    while (response[0] != 0x02.toByte() || response[1] != 0x02.toByte()) {
-      response = sendMessage(createPageWriteMessage(1, page1Data))
-    }
+    response = sendMessage(createPageWriteMessage(1, page1Data), byteArrayOf(0x02.toByte(), 0x02.toByte()))
+//    while (response[0] != 0x02.toByte() || response[1] != 0x02.toByte()) {
+//      response = sendMessage(createPageWriteMessage(1, page1Data), pageHeader)
+//    }
 
     // Step 5: Send end of transmission
     onStatus("Saving to CDI...")
-    response = sendMessage(END_OF_TRANSMISSION)
-    while (response[0] != 0x02.toByte() || response[1] != 0x03.toByte()) {
-      response = sendMessage(END_OF_TRANSMISSION)
-    }
+//    val eotHeader =
+    response = sendMessage(WRITE_TIMING_MAP_END_OF_TRANSMISSION, byteArrayOf(0x02.toByte(), 0x03.toByte()))
+//    while (response[0] != 0x02.toByte() || response[1] != 0x03.toByte()) {
+//      response = sendMessage(WRITE_TIMING_MAP_END_OF_TRANSMISSION, eotHeader)
+//    }
 
     // Step 6: Send compatibility message
-    response = sendMessage(COMPATIBILITY_MESSAGE)
-    while (response[0] != 0x02.toByte() || response[1] != 0x04.toByte()) {
-      response = sendMessage(COMPATIBILITY_MESSAGE)
-    }
+//    val compatHeader =
+    response = sendMessage(WRITE_TIMING_MAP_COMPATIBILITY_MESSAGE, byteArrayOf(0x02.toByte(), 0x04.toByte()))
+//    while (response[0] != 0x02.toByte() || response[1] != 0x04.toByte()) {
+//      response = sendMessage(WRITE_TIMING_MAP_COMPATIBILITY_MESSAGE, compatHeader)
+//    }
 
     // Step 7: Send end of transmission compatibility message
-    response = sendMessage(END_OF_TRANSMISSION_COMPATIBILITY_MESSAGE)
-    while (response[0] != 0x02.toByte() || response[1] != 0x05.toByte()) {
-      response = sendMessage(END_OF_TRANSMISSION_COMPATIBILITY_MESSAGE)
-    }
+//    val eotCompatHeader =
+    response = sendMessage(WRITE_TIMING_MAP_END_OF_TRANSMISSION_COMPATIBILITY_MESSAGE, byteArrayOf(0x02.toByte(), 0x05.toByte()))
+//    while (response[0] != 0x02.toByte() || response[1] != 0x05.toByte()) {
+//      response = sendMessage(WRITE_TIMING_MAP_END_OF_TRANSMISSION_COMPATIBILITY_MESSAGE, eotCompatHeader)
+//    }
   }
 }

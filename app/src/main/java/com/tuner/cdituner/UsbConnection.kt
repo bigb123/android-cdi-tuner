@@ -254,7 +254,7 @@ class UsbConnection : Service() {
       try {
         // Use shared protocol implementation
         val timingMap = CdiTimingMapProtocol.readTimingMapData(
-          sendMessage = { message -> sendMessage(message) },
+          sendMessage = { message, expectedHeader -> sendMessage(message, expectedHeader) },
           onStatus = { status -> _timingMapStatus.value = status }
         )
 
@@ -303,7 +303,7 @@ class UsbConnection : Service() {
         // Use shared protocol implementation
         CdiTimingMapProtocol.writeTimingMapData(
           timingMap = timingMap,
-          sendMessage = { message -> sendMessage(message) },
+          sendMessage = { message, expectedHeader -> sendMessage(message, expectedHeader) },
           onStatus = { status -> _timingMapStatus.value = status }
         )
         
@@ -322,20 +322,26 @@ class UsbConnection : Service() {
 
 
 
-  private suspend fun sendMessage(message: ByteArray, responseSize: Int = CdiTimingMapProtocol.TIMING_PAGE_SIZE): ByteArray {
+  private suspend fun sendMessage(message: ByteArray, expectedHeader: ByteArray, responseSize: Int = CdiTimingMapProtocol.TIMING_PAGE_SIZE): ByteArray {
     // Mutex ensures only one sendMessage can run at a time
     // This prevents message/response mismatch when multiple coroutines try to communicate
     return sendMessageMutex.withLock {
-      // Send message and read a response
-      serialPort?.write(message, 1000)
+
       Log.d("UsbConnection", "Sent a message: ${message.joinToString(" ") { "%02X".format(it) }}")
+      var response = ByteArray(0)
 
-      // Wait for CDI ready response
-      delay(100)
+      // Send a message and expect a response. If response header is wrong - retry sending a message
+      while (response.isEmpty()) {
+        serialPort?.write(message, 1000)
+        Log.d("UsbConnection", "Incorrect response. Sent a message again: ${message.joinToString(" ") { "%02X".format(it) }}")
 
-      val response = readFullPage(responseSize)
+        // Wait for CDI ready response
+        delay(CdiTimingMapProtocol.WAIT)
+
+        response = readFullPage(responseSize, expectedHeader)
+      }
+
       Log.d("UsbConnection", "CDI response: ${response.joinToString(" ") { "%02X".format(it) }}")
-
       response
     }
   }
@@ -344,7 +350,7 @@ class UsbConnection : Service() {
    * Reads a full 64-byte page from the serial port.
    * Handles partial reads by retrying until complete or timeout.
    */
-  private suspend fun readFullPage(responseSize: Int): ByteArray {
+  private suspend fun readFullPage(responseSize: Int, expectedHeader: ByteArray): ByteArray {
     val pageBuffer = ByteArray(responseSize)
     var totalBytesRead = 0
     var attempts = 0
@@ -353,7 +359,13 @@ class UsbConnection : Service() {
     while (totalBytesRead < responseSize && attempts < maxAttempts) {
       val chunk = ByteArray(responseSize)
       val bytesRead = serialPort?.read(chunk, 500) ?: 0
-      
+
+      // If header doesn't match let's return an empty array to allow for retry.
+      // That should speed up the fail-and-retry process.
+      if (attempts == 0 && bytesRead > 0 && !expectedHeader.contentEquals(chunk.copyOfRange(0, expectedHeader.size))) {
+        return ByteArray(0)
+      }
+
       if (bytesRead > 0) {
         Log.d("UsbConnection", "Response bytes so far after sending a message: ${chunk.joinToString(" ") { "%02X".format(it) }}")
         Log.d("UsbConnection", "Number of response bytes so far: $bytesRead")
