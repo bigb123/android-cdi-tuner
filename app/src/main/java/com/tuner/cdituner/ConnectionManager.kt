@@ -122,7 +122,7 @@ class ConnectionManager(private val context: Context) {
         observeUsbService()
         // Call the suspend function to find and connect
         while (usb.findAndConnect() != 0) {
-          delay(1000)
+          delay(CdiTimingMapProtocol.WAIT_LONG)
         }
         // After findAndConnect returns 0, check if we actually connected
         // by observing the connection status

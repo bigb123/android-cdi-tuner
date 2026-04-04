@@ -326,14 +326,21 @@ class UsbConnection : Service() {
     // Mutex ensures only one sendMessage can run at a time
     // This prevents message/response mismatch when multiple coroutines try to communicate
     return sendMessageMutex.withLock {
-      // Send message and read a response
-      serialPort?.write(message, 1000)
-      Log.d("UsbConnection", "Sent a message: ${message.joinToString(" ") { "%02X".format(it) }}")
 
-      // Wait for CDI ready response
-      delay(100)
+      Log.d("UsbConnection", "Sending a message: ${message.joinToString(" ") { "%02X".format(it) }}")
 
-      val response = readFullPage(responseSize)
+      var response = ByteArray(0)
+
+      while (response.isEmpty()) {
+        // Send message
+        serialPort?.write(message, 1000)
+
+        // Wait for CDI ready response
+        delay(CdiTimingMapProtocol.WAIT)
+
+        // Get a response
+        response = readFullPage(responseSize)
+      }
       Log.d("UsbConnection", "CDI response: ${response.joinToString(" ") { "%02X".format(it) }}")
 
       response

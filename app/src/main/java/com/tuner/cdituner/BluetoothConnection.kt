@@ -154,17 +154,15 @@ class BluetoothConnection : Service() {
         try {
           while (isActive) {
 
-//            delay(CdiTimingMapProtocol.WAIT)
-
             // Skip sending/reading when paused for timing map operations
             if (pauseCdiCommunication) {
               delay(CdiTimingMapProtocol.WAIT_LONG)
               continue
             }
             else {
-              var response = sendMessage(CdiMessageProcessing.CDI_MESSAGE, CdiTimingMapProtocol.STATUS_PAGE_SIZE)
+              var response = sendMessage(CdiMessageProcessing.STATUS_MESSAGE, CdiTimingMapProtocol.STATUS_PAGE_SIZE)
               while (response[0] != 0x03.toByte()) {
-                response = sendMessage(CdiMessageProcessing.CDI_MESSAGE, CdiTimingMapProtocol.STATUS_PAGE_SIZE)
+                response = sendMessage(CdiMessageProcessing.STATUS_MESSAGE, CdiTimingMapProtocol.STATUS_PAGE_SIZE)
               }
 
               packetCount = CdiMessageProcessing.processMessage(response, 0, packetCount, _receivedData, _connectionStatus)
