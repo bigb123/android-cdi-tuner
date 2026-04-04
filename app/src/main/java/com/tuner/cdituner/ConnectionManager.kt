@@ -115,14 +115,14 @@ class ConnectionManager(private val context: Context) {
       
       while (!usbServiceBound && (System.currentTimeMillis() - startTime) < maxWaitTime) {
         _connectionStatus.value = "Waiting for USB service..."
-        delay(100)
+        delay(CdiTimingMapProtocol.WAIT_LONG)
       }
       
       usbConnection?.let { usb ->
         observeUsbService()
         // Call the suspend function to find and connect
         while (usb.findAndConnect() != 0) {
-          delay(1000)
+          delay(CdiTimingMapProtocol.WAIT_LONG)
         }
         // After findAndConnect returns 0, check if we actually connected
         // by observing the connection status
@@ -154,7 +154,7 @@ class ConnectionManager(private val context: Context) {
       
       while (!bluetoothServiceBound && (System.currentTimeMillis() - startTime) < maxWaitTime) {
         _connectionStatus.value = "BT: Waiting for service..."
-        delay(100)
+        delay(CdiTimingMapProtocol.WAIT_LONG)
       }
       
       bluetoothConnection?.let {

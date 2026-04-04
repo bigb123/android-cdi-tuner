@@ -102,6 +102,18 @@ object CdiTimingMapProtocol {
   /** Number of timing points in the map */
   const val TIMING_POINTS = 16
 
+  /** Delay times in milliseconds
+   *  WAIT is a global delay for any operation that sends a request to a CDI and expects response. The response isn't available immediately so we experimentally determined the best time to wait. It's a perfect balance between refresh delay and to not overwhelm CDI with read requests.
+   *  Observations:
+   *  - 25 ms - a bit too little. CDI isn't responding clearly for every request
+   *  - 30 ms - very snappy. No errors
+   *
+   *  WAIT_LONG is useful for reconnecting
+   * */
+  const val WAIT = 30L
+  const val WAIT_LONG = 1000L
+
+
   /**
    * Validates a received page from CDI.
    * @param page The 64-byte page data
