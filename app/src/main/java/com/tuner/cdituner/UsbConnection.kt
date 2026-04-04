@@ -188,40 +188,35 @@ class UsbConnection : Service() {
       try {
         while (isActive) {
 
-          delay(100)
-
           // Skip sending/reading when paused for timing map operations
           if (pauseCdiCommunication) {
-            delay(1000)
+            delay(CdiTimingMapProtocol.WAIT_LONG)
             continue
           }
-          // below code with sendMessage() function usage didn't work. Worth to revisit another time
-//          else {
-//            var response = sendMessage(CdiMessageProcessing.CDI_MESSAGE,CdiTimingMapProtocol.STATUS_PAGE_SIZE)
-//            while (response[0] != 0x03.toByte()) {
-//              response = sendMessage(CdiMessageProcessing.CDI_MESSAGE,CdiTimingMapProtocol.STATUS_PAGE_SIZE)
-//            }
-//            packetCount = CdiMessageProcessing.processMessage(response, 0, packetCount, _receivedData, _connectionStatus)
-//          }
+          // Usage of sendMessage() function doesn't work below because we have to read 64 bytes of data even if response has only 22 bytes.
+          // We have to find out where in the bytes is our response. sendMessage() doesn't support it
 
-            serialPort?.write(CdiMessageProcessing.CDI_MESSAGE, 500)
-            delay(100)
+          serialPort?.write(CdiMessageProcessing.STATUS_MESSAGE, 500)
 
-            // Read response
-            val buffer = ByteArray(64)
-            val numBytesRead = serialPort?.read(buffer, 500) ?: 0
+          // After writing to CDI it's worth to let CDI catch up
+          delay(CdiTimingMapProtocol.WAIT)
 
-            if (numBytesRead >= 22) {
-              var startIdx = CdiMessageProcessing.extractMessageFromBytes(numBytesRead, buffer)
+          // Read response
+          val buffer = ByteArray(64)
+          val numBytesRead = serialPort?.read(buffer, 500) ?: 0
 
-              if (startIdx >= 0) {
-                packetCount = CdiMessageProcessing.processMessage(buffer, startIdx, packetCount, _receivedData, _connectionStatus)
-              }
-            } else if (numBytesRead > 0) {
-              _connectionStatus.value = "Connected - Partial data: $numBytesRead bytes"
+          if (numBytesRead >= 22) {
+            var startIdx = CdiMessageProcessing.extractMessageFromBytes(numBytesRead, buffer)
+
+            if (startIdx >= 0) {
+              packetCount = CdiMessageProcessing.processMessage(buffer, startIdx, packetCount, _receivedData, _connectionStatus)
             }
+          } else if (numBytesRead > 0) {
+            _connectionStatus.value = "Connected - Partial data: $numBytesRead bytes"
+          }
 
-            delay(100)
+          // Delay is required as we will get partial reads otherwise
+          delay(CdiTimingMapProtocol.WAIT)
         }
       } catch (e: IOException) {
         _connectionStatus.value = "Connection lost: ${e.message}"
@@ -244,7 +239,7 @@ class UsbConnection : Service() {
     scope.launch {
       // Avoid sending new messages if writing operation is still ongoing
       while (pauseCdiCommunication) {
-        delay(100)
+        delay(CdiTimingMapProtocol.WAIT_LONG)
         continue
       }
       // Pause normal data monitoring (keeps connection alive)
@@ -296,7 +291,7 @@ class UsbConnection : Service() {
     scope.launch {
       // Avoid sending new messages if reading operation is still ongoing
       while (pauseCdiCommunication) {
-        delay(100)
+        delay(CdiTimingMapProtocol.WAIT_LONG)
         continue
       }
       // Pause normal data monitoring (keeps connection alive)
@@ -375,7 +370,7 @@ class UsbConnection : Service() {
       
       attempts++
       if (totalBytesRead < responseSize) {
-        delay(100)
+        delay(CdiTimingMapProtocol.WAIT)
       }
     }
     

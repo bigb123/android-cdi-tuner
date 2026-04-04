@@ -115,7 +115,7 @@ class ConnectionManager(private val context: Context) {
       
       while (!usbServiceBound && (System.currentTimeMillis() - startTime) < maxWaitTime) {
         _connectionStatus.value = "Waiting for USB service..."
-        delay(100)
+        delay(CdiTimingMapProtocol.WAIT_LONG)
       }
       
       usbConnection?.let { usb ->
@@ -154,7 +154,7 @@ class ConnectionManager(private val context: Context) {
       
       while (!bluetoothServiceBound && (System.currentTimeMillis() - startTime) < maxWaitTime) {
         _connectionStatus.value = "BT: Waiting for service..."
-        delay(100)
+        delay(CdiTimingMapProtocol.WAIT_LONG)
       }
       
       bluetoothConnection?.let {

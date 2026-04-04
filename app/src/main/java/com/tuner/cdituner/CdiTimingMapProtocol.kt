@@ -102,6 +102,11 @@ object CdiTimingMapProtocol {
   /** Number of timing points in the map */
   const val TIMING_POINTS = 16
 
+  /** Delay time */
+  const val WAIT = 50L
+  const val WAIT_LONG = 1000L
+
+
   /**
    * Validates a received page from CDI.
    * @param page The 64-byte page data

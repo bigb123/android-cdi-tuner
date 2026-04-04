@@ -58,10 +58,6 @@ class BluetoothConnection : Service() {
   // Mutex to prevent parallel sendMessage calls
   private val sendMessageMutex = Mutex()
 
-  companion object {
-    private const val RECONNECT_DELAY_MS = 1000L
-  }
-
   // Standard SPP UUID for Serial Port Profile
   private val SPP_UUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
 
@@ -146,8 +142,8 @@ class BluetoothConnection : Service() {
         _connectionStatus.value = "Connecting..."
 
         if (!openConnection()) {
-          _connectionStatus.value = "Connection failed. Retrying in ${RECONNECT_DELAY_MS / 1000}s..."
-          delay(RECONNECT_DELAY_MS)
+          _connectionStatus.value = "Connection failed. Retrying in ${CdiTimingMapProtocol.WAIT_LONG / 1000}s..."
+          delay(CdiTimingMapProtocol.WAIT_LONG)
           continue
         }
 
@@ -158,11 +154,11 @@ class BluetoothConnection : Service() {
         try {
           while (isActive) {
 
-            delay(100)
+//            delay(CdiTimingMapProtocol.WAIT)
 
             // Skip sending/reading when paused for timing map operations
             if (pauseCdiCommunication) {
-              delay(RECONNECT_DELAY_MS)
+              delay(CdiTimingMapProtocol.WAIT_LONG)
               continue
             }
             else {
@@ -178,7 +174,7 @@ class BluetoothConnection : Service() {
           // Connection lost — close socket and let the outer loop reconnect
           _connectionStatus.value = "Connection lost. Waiting for device..."
 //          closeSocket()
-          delay(RECONNECT_DELAY_MS)
+          delay(CdiTimingMapProtocol.WAIT_LONG)
         }
       }
     }
@@ -211,7 +207,7 @@ class BluetoothConnection : Service() {
     scope.launch {
       // Avoid sending new messages if writing operation is still ongoing
       while (pauseCdiCommunication) {
-        delay(100)
+        delay(CdiTimingMapProtocol.WAIT)
         continue
       }
 
@@ -264,7 +260,7 @@ class BluetoothConnection : Service() {
     scope.launch {
       // Avoid sending new messages if reading operation is still ongoing
       while (pauseCdiCommunication) {
-        delay(100)
+        delay(CdiTimingMapProtocol.WAIT)
         continue
       }
       // Pause normal data monitoring (keeps connection alive)
@@ -303,8 +299,8 @@ class BluetoothConnection : Service() {
       outputStream?.flush()
       Log.d("BluetoothConnection", "Sent a message: ${message.joinToString(" ") { "%02X".format(it) }}")
 
-      // Wait for CDI to catch up
-      delay(100)
+        // Wait for CDI to catch up
+        delay(CdiTimingMapProtocol.WAIT)
 
       // read a response
       val response = readFullPage(responseSize)
@@ -344,7 +340,7 @@ class BluetoothConnection : Service() {
       
       attempts++
       if (totalBytesRead < responseSize) {
-        delay(100) // wait for CDI to catch up. We shouldn't flood it with request. Otherwise, Bluetooth module may disconnect and power cycle is needed.
+        delay(CdiTimingMapProtocol.WAIT) // wait for CDI to catch up. We shouldn't flood it with request. Otherwise, Bluetooth module may disconnect and power cycle is needed.
       }
     }
     return pageBuffer

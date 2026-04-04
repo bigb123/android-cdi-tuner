@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 object CdiMessageProcessing {
 
   // A sequence of bytes that we send to CDI to receive a response
-  val CDI_MESSAGE = byteArrayOf(0x01, 0xAB.toByte(), 0xAC.toByte(), 0xA1.toByte())
+  val STATUS_MESSAGE = byteArrayOf(0x01, 0xAB.toByte(), 0xAC.toByte(), 0xA1.toByte())
   
   /**
    * Decodes a 22-byte CDI packet into a CdiReceivedMessageDecoder object.
