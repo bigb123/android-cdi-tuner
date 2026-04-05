@@ -755,7 +755,7 @@ fun TimingCurveGraph(
         if (rpmX >= chartLeft && rpmX <= chartRight) {
           // Draw a semi-transparent blue vertical bar
           drawLine(
-            color = Color.Blue.copy(alpha = 0.4f),
+            color = Color.Blue.copy(alpha = 0.7f),
             start = Offset(rpmX, chartTop),
             end = Offset(rpmX, chartBottom),
             strokeWidth = 3.dp.toPx(),

@@ -96,18 +96,6 @@ fun LoggingScreen(
       }
     }
 
-    // Legend
-    Row(
-      modifier = Modifier
-        .fillMaxWidth()
-        .padding(vertical = 4.dp),
-      horizontalArrangement = Arrangement.SpaceEvenly
-    ) {
-      LegendItem(color = Color(0xFFE53935), label = "RPM", value = dataPoints.lastOrNull()?.rpm?.toString() ?: "--")
-      LegendItem(color = Color(0xFF4CAF50), label = "Speed", value = dataPoints.lastOrNull()?.speedKmh?.let { "%.0f".format(it) } ?: "--")
-      LegendItem(color = Color(0xFF2196F3), label = "Timing", value = dataPoints.lastOrNull()?.timingAngle?.let { "%.1f°".format(it) } ?: "--")
-    }
-
     // Zoom controls
     Row(
       modifier = Modifier
@@ -136,38 +124,77 @@ fun LoggingScreen(
       }
     }
 
-    // Chart area
-    Box(
-      modifier = Modifier
-        .fillMaxWidth()
-        .weight(1f)
-        .padding(top = 8.dp)
-    ) {
-      if (dataPoints.isEmpty()) {
-        // Empty state
-        Box(
-          modifier = Modifier.fillMaxSize(),
-          contentAlignment = Alignment.Center
-        ) {
-          Text(
-            text = "Press Record to start logging data",
-            color = gaugeColors.labelText,
-            fontSize = 16.sp
-          )
-        }
-      } else {
-        // Chart
-        MultiLineChart(
-          dataPoints = dataPoints,
-          viewWindowSeconds = viewWindowSeconds,
-          scrollOffset = scrollOffset,
-          onScroll = { delta ->
-            val maxScroll = (totalDuration - viewWindowSeconds).coerceAtLeast(0f)
-            scrollOffset = (scrollOffset - delta).coerceIn(0f, maxScroll)
-          },
-          modifier = Modifier.fillMaxSize()
+    // Charts area
+    if (dataPoints.isEmpty()) {
+      Box(
+        modifier = Modifier
+          .fillMaxWidth()
+          .weight(1f),
+        contentAlignment = Alignment.Center
+      ) {
+        Text(
+          text = "Press Record to start logging data",
+          color = gaugeColors.labelText,
+          fontSize = 16.sp
         )
       }
+    } else {
+      // RPM Chart
+      SingleMetricChart(
+        dataPoints = dataPoints,
+        viewWindowSeconds = viewWindowSeconds,
+        scrollOffset = scrollOffset,
+        onScroll = { delta ->
+          val maxScroll = (totalDuration - viewWindowSeconds).coerceAtLeast(0f)
+          scrollOffset = (scrollOffset - delta).coerceIn(0f, maxScroll)
+        },
+        label = "RPM",
+        unit = "rpm",
+        color = Color(0xFFE53935),
+        getValue = { it.rpm.toFloat() },
+        currentValue = dataPoints.lastOrNull()?.rpm?.toString() ?: "--",
+        modifier = Modifier
+          .fillMaxWidth()
+          .weight(1f)
+      )
+
+      // Timing Chart
+      SingleMetricChart(
+        dataPoints = dataPoints,
+        viewWindowSeconds = viewWindowSeconds,
+        scrollOffset = scrollOffset,
+        onScroll = { delta ->
+          val maxScroll = (totalDuration - viewWindowSeconds).coerceAtLeast(0f)
+          scrollOffset = (scrollOffset - delta).coerceIn(0f, maxScroll)
+        },
+        label = "Timing",
+        unit = "°",
+        color = Color(0xFF2196F3),
+        getValue = { it.timingAngle },
+        currentValue = dataPoints.lastOrNull()?.timingAngle?.let { "%.1f".format(it) } ?: "--",
+        modifier = Modifier
+          .fillMaxWidth()
+          .weight(1f)
+      )
+
+      // Speed Chart
+      SingleMetricChart(
+        dataPoints = dataPoints,
+        viewWindowSeconds = viewWindowSeconds,
+        scrollOffset = scrollOffset,
+        onScroll = { delta ->
+          val maxScroll = (totalDuration - viewWindowSeconds).coerceAtLeast(0f)
+          scrollOffset = (scrollOffset - delta).coerceIn(0f, maxScroll)
+        },
+        label = "Speed",
+        unit = "km/h",
+        color = Color(0xFF4CAF50),
+        getValue = { it.speedKmh },
+        currentValue = dataPoints.lastOrNull()?.speedKmh?.let { "%.0f".format(it) } ?: "--",
+        modifier = Modifier
+          .fillMaxWidth()
+          .weight(1f)
+      )
     }
 
     // Time info
@@ -183,39 +210,19 @@ fun LoggingScreen(
 }
 
 @Composable
-private fun LegendItem(color: Color, label: String, value: String) {
-  val gaugeColors = LocalGaugeColors.current
-
-  Row(
-    verticalAlignment = Alignment.CenterVertically
-  ) {
-    Canvas(modifier = Modifier.size(12.dp)) {
-      drawCircle(color = color, radius = size.minDimension / 2)
-    }
-    Spacer(modifier = Modifier.width(4.dp))
-    Text(
-      text = "$label: $value",
-      color = gaugeColors.valueText,
-      fontSize = 12.sp,
-      fontWeight = FontWeight.Medium
-    )
-  }
-}
-
-@Composable
-private fun MultiLineChart(
+private fun SingleMetricChart(
   dataPoints: List<LogDataPoint>,
   viewWindowSeconds: Float,
   scrollOffset: Float,
   onScroll: (Float) -> Unit,
+  label: String,
+  unit: String,
+  color: Color,
+  getValue: (LogDataPoint) -> Float,
+  currentValue: String,
   modifier: Modifier = Modifier
 ) {
   val gaugeColors = LocalGaugeColors.current
-
-  // Colors for each line
-  val rpmColor = Color(0xFFE53935)      // Red
-  val speedColor = Color(0xFF4CAF50)    // Green
-  val timingColor = Color(0xFF2196F3)   // Blue
 
   // Calculate visible time range
   val firstTimestamp = dataPoints.first().timestamp
@@ -232,113 +239,86 @@ private fun MultiLineChart(
     relativeTime >= startTime && relativeTime <= endTime
   }
 
-  // Calculate max values for normalization
-  val maxRpm = dataPoints.maxOfOrNull { it.rpm }?.toFloat()?.coerceAtLeast(1000f) ?: 12000f
-  val maxSpeed = dataPoints.maxOfOrNull { it.speedKmh }?.coerceAtLeast(10f) ?: 200f
-  val maxTiming = dataPoints.maxOfOrNull { it.timingAngle }?.coerceAtLeast(10f) ?: 60f
+  // Calculate max value for normalization
+  val maxValue = dataPoints.maxOfOrNull { getValue(it) }?.coerceAtLeast(1f) ?: 100f
 
-  Canvas(
-    modifier = modifier
-      .pointerInput(Unit) {
-        detectHorizontalDragGestures { _, dragAmount ->
-          // Convert drag to time offset
-          val secondsPerPixel = viewWindowSeconds / size.width
-          onScroll(dragAmount * secondsPerPixel)
+  Column(modifier = modifier.padding(vertical = 2.dp)) {
+    // Label row
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Canvas(modifier = Modifier.size(10.dp)) {
+          drawCircle(color = color, radius = size.minDimension / 2)
         }
+        Spacer(modifier = Modifier.width(4.dp))
+        Text(
+          text = label,
+          color = gaugeColors.labelText,
+          fontSize = 11.sp,
+          fontWeight = FontWeight.Medium
+        )
       }
-  ) {
-    val chartWidth = size.width
-    val chartHeight = size.height
-    val padding = 40f
-
-    val plotWidth = chartWidth - padding * 2
-    val plotHeight = chartHeight - padding * 2
-
-    // Draw grid lines
-    val gridColor = gaugeColors.arcBackground
-
-    // Horizontal grid lines (5 lines)
-    for (i in 0..4) {
-      val y = padding + (plotHeight * i / 4)
-      drawLine(
-        color = gridColor,
-        start = Offset(padding, y),
-        end = Offset(chartWidth - padding, y),
-        strokeWidth = 1f
+      Text(
+        text = "$currentValue $unit",
+        color = gaugeColors.valueText,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.Bold
       )
     }
 
-    // Vertical grid lines (time markers)
-    val timeStep = when {
-      viewWindowSeconds <= 60 -> 10f
-      viewWindowSeconds <= 120 -> 20f
-      else -> 60f
-    }
+    // Chart canvas
+    Canvas(
+      modifier = Modifier
+        .fillMaxWidth()
+        .weight(1f)
+        .pointerInput(Unit) {
+          detectHorizontalDragGestures { _, dragAmount ->
+            val secondsPerPixel = viewWindowSeconds / size.width
+            onScroll(dragAmount * secondsPerPixel)
+          }
+        }
+    ) {
+      val chartWidth = size.width
+      val chartHeight = size.height
+      val padding = 4f
 
-    var t = (startTime / timeStep).toInt() * timeStep
-    while (t <= endTime) {
-      if (t >= startTime) {
-        val x = padding + ((t - startTime) / viewWindowSeconds) * plotWidth
+      val plotWidth = chartWidth - padding * 2
+      val plotHeight = chartHeight - padding * 2
+
+      // Draw background grid
+      val gridColor = gaugeColors.arcBackground
+
+      // Horizontal grid lines (3 lines)
+      for (i in 0..2) {
+        val y = padding + (plotHeight * i / 2)
         drawLine(
           color = gridColor,
-          start = Offset(x, padding),
-          end = Offset(x, chartHeight - padding),
+          start = Offset(padding, y),
+          end = Offset(chartWidth - padding, y),
           strokeWidth = 1f
         )
       }
-      t += timeStep
+
+      // Draw the line
+      if (visiblePoints.size >= 2) {
+        val path = Path()
+        visiblePoints.forEachIndexed { index, point ->
+          val relativeTime = (point.timestamp - firstTimestamp) / 1000f
+          val x = padding + ((relativeTime - startTime) / viewWindowSeconds) * plotWidth
+          val value = getValue(point)
+          val y = padding + plotHeight - (value / maxValue) * plotHeight
+
+          if (index == 0) {
+            path.moveTo(x, y)
+          } else {
+            path.lineTo(x, y)
+          }
+        }
+        drawPath(path, color, style = Stroke(width = 2f))
+      }
     }
-
-    // Draw lines for each metric
-    if (visiblePoints.size >= 2) {
-      // RPM line
-      val rpmPath = Path()
-      visiblePoints.forEachIndexed { index, point ->
-        val relativeTime = (point.timestamp - firstTimestamp) / 1000f
-        val x = padding + ((relativeTime - startTime) / viewWindowSeconds) * plotWidth
-        val y = padding + plotHeight - (point.rpm / maxRpm) * plotHeight
-
-        if (index == 0) {
-          rpmPath.moveTo(x, y)
-        } else {
-          rpmPath.lineTo(x, y)
-        }
-      }
-      drawPath(rpmPath, rpmColor, style = Stroke(width = 2f))
-
-      // Speed line
-      val speedPath = Path()
-      visiblePoints.forEachIndexed { index, point ->
-        val relativeTime = (point.timestamp - firstTimestamp) / 1000f
-        val x = padding + ((relativeTime - startTime) / viewWindowSeconds) * plotWidth
-        val y = padding + plotHeight - (point.speedKmh / maxSpeed) * plotHeight
-
-        if (index == 0) {
-          speedPath.moveTo(x, y)
-        } else {
-          speedPath.lineTo(x, y)
-        }
-      }
-      drawPath(speedPath, speedColor, style = Stroke(width = 2f))
-
-      // Timing line
-      val timingPath = Path()
-      visiblePoints.forEachIndexed { index, point ->
-        val relativeTime = (point.timestamp - firstTimestamp) / 1000f
-        val x = padding + ((relativeTime - startTime) / viewWindowSeconds) * plotWidth
-        val y = padding + plotHeight - (point.timingAngle / maxTiming) * plotHeight
-
-        if (index == 0) {
-          timingPath.moveTo(x, y)
-        } else {
-          timingPath.lineTo(x, y)
-        }
-      }
-      drawPath(timingPath, timingColor, style = Stroke(width = 2f))
-    }
-
-    // Draw axis labels
-    // Y-axis labels would require DrawScope.drawText which needs more setup
-    // For simplicity, we rely on the legend showing current values
   }
 }
