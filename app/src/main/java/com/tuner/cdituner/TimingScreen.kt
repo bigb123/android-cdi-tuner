@@ -623,8 +623,12 @@ fun TimingCurveGraph(
             end = Offset(x, chartBottom),
             strokeWidth = 1.dp.toPx()
           )
-          // RPM labels
-          val label = if (rpm >= 1000) "${rpm / 1000}k" else "$rpm"
+          // RPM labels - show decimals for values like 1500 -> "1.5k"
+          val label = when {
+            rpm >= 1000 && rpm % 1000 == 0 -> "${rpm / 1000}k"
+            rpm >= 1000 -> "%.1fk".format(rpm / 1000f)
+            else -> "$rpm"
+          }
           val textLayoutResult = textMeasurer.measure(
             text = label,
             style = TextStyle(fontSize = 10.sp, color = textColor)
