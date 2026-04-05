@@ -79,6 +79,7 @@ private data class ChartDimensions(
  * @param onPointClick Callback when a timing point is clicked (index, point)
  * @param onPointDrag Callback when a timing point is dragged to new values (index, newRpm, newTimingRaw)
  * @param onLockWithChanges Callback when the chart is locked AND there are pending changes to save (full map for saving to CDI)
+ * @param currentRpm Current engine RPM to display as a vertical indicator bar (null if not available)
  */
 @Composable
 fun TimingScreen(
@@ -88,6 +89,7 @@ fun TimingScreen(
   onPointClick: (Int, TimingPoint) -> Unit = { _, _ -> },
   onPointDrag: (Int, Int, Int) -> Unit = { _, _, _ -> },
   onLockWithChanges: (List<TimingPoint>) -> Unit = { _ -> },
+  currentRpm: Int? = null,
   modifier: Modifier = Modifier
 ) {
   val gaugeColors = LocalGaugeColors.current
@@ -181,6 +183,7 @@ fun TimingScreen(
         isLocked = isLocked,
         hasUnsavedChanges = hasUnsavedChanges.value,
         canUndo = timingMapHistory.value.isNotEmpty(),
+        currentRpm = currentRpm,
         onUndo = {
           // Pop the last state from history and restore it
           val history = timingMapHistory.value
@@ -300,6 +303,7 @@ fun TimingScreen(
  * @param timingCurve List of timing points to display
  * @param selectedIndex Currently selected point index (null if none)
  * @param hasUnsavedChanges Whether there are unsaved changes to the timing map
+ * @param currentRpm Current engine RPM to display as a vertical indicator bar (null if not available)
  * @param onPointClick Callback when a point is clicked (index, point)
  * @param onDeselect Callback when user taps outside any point
  * @param onPointDrag Callback when a point is dragged to new values (index, newRpm, newTimingRaw)
@@ -314,6 +318,7 @@ fun TimingCurveGraph(
   isLocked: MutableState<Boolean> = mutableStateOf(true),
   hasUnsavedChanges: Boolean = false,
   canUndo: Boolean = false,
+  currentRpm: Int? = null,
   onUndo: () -> Unit = {},
   onPointClick: (Int, TimingPoint) -> Unit = { _, _ -> },
   onDeselect: () -> Unit = {},
@@ -740,6 +745,22 @@ fun TimingCurveGraph(
               )
             }
           }
+        }
+      }
+
+      // Draw current RPM indicator as a blue vertical bar
+      if (currentRpm != null && currentRpm > 0) {
+        val rpmX = rpmToX(currentRpm.toFloat())
+        // Only draw if the RPM is within the visible range
+        if (rpmX >= chartLeft && rpmX <= chartRight) {
+          // Draw a semi-transparent blue vertical bar
+          drawLine(
+            color = Color.Blue.copy(alpha = 0.4f),
+            start = Offset(rpmX, chartTop),
+            end = Offset(rpmX, chartBottom),
+            strokeWidth = 3.dp.toPx(),
+            cap = StrokeCap.Round
+          )
         }
       }
 

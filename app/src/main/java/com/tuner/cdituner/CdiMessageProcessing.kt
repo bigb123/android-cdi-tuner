@@ -37,7 +37,7 @@ object CdiMessageProcessing {
     // Extract battery voltage from byte 7
     val cdiVoltage = (data[7].toInt() and 0xFF) / 10.0f
 
-    // Extract timing bytee
+    // Extract timing byte
     val timingAngle = data[13].toFloat() / 2
 
     return CdiReceivedMessageDecoder(rpm, cdiVoltage, timingAngle)

@@ -301,6 +301,7 @@ class MainActivity : ComponentActivity() {
                 // Write the updated timing map to CDI when user locks the chart (saves changes)
                 connectionManager.writeTimingMap(updatedMap)
               },
+              currentRpm = cdiData?.rpm,
               modifier = Modifier.fillMaxSize()
             )
           }
