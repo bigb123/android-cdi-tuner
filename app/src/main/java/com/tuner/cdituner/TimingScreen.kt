@@ -711,7 +711,7 @@ fun TimingCurveGraph(
       val rpm10kX = rpmToX(10000f)
       if (rpm10kX >= chartLeft && rpm10kX <= chartRight) {
         drawLine(
-          color = Color(0xFFFF9800).copy(alpha = 0.5f),  // Orange with 30% opacity
+          color = Color(0xFFFF9800).copy(alpha = 0.5f),  // Orange with 50% opacity
           start = Offset(rpm10kX, chartTop),
           end = Offset(rpm10kX, chartBottom),
           strokeWidth = 2.dp.toPx(),
