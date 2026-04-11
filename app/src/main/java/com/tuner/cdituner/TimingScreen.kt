@@ -87,6 +87,7 @@ private data class ChartDimensions(
 fun TimingScreen(
   timingMap: List<TimingPoint>?,
   statusMessage: String?,
+  currentRpm: Int? = null,
   onRefresh: () -> Unit,
   onPointClick: (Int, TimingPoint) -> Unit = { _, _ -> },
   onPointDrag: (Int, Int, Int) -> Unit = { _, _, _ -> },
@@ -194,6 +195,7 @@ fun TimingScreen(
       TimingCurveGraph(
         timingCurve = displayMap,
         selectedIndex = selectedPointIndex.value,
+        currentRpm = currentRpm,
         isLocked = isLocked,
         hasUnsavedChanges = hasUnsavedChanges.value,
         canUndo = timingMapHistory.value.isNotEmpty(),
@@ -335,6 +337,7 @@ fun TimingScreen(
 fun TimingCurveGraph(
   timingCurve: List<TimingPoint>,
   selectedIndex: Int? = null,
+  currentRpm: Int? = null,
   isLocked: MutableState<Boolean> = mutableStateOf(true),
   hasUnsavedChanges: Boolean = false,
   canUndo: Boolean = false,
@@ -680,7 +683,7 @@ fun TimingCurveGraph(
           val label = "${timing}°"
           val textLayoutResult = textMeasurer.measure(
             text = label,
-            style = TextStyle(fontSize = 10.sp, color = textColor)
+            style = TextStyle(fontSize = 12.sp, color = textColor)
           )
           drawText(
             textLayoutResult = textLayoutResult,

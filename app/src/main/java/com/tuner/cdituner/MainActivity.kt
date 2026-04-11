@@ -296,6 +296,7 @@ class MainActivity : ComponentActivity() {
             TimingScreen(
               timingMap = timingMap,
               statusMessage = timingMapStatus,
+              currentRpm = cdiData?.rpm,
               onRefresh = { connectionManager.refreshTimingMap() },
               onLockWithChanges = { updatedMap ->
                 // Write the updated timing map to CDI when user locks the chart (saves changes)
