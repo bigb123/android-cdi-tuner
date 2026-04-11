@@ -707,6 +707,18 @@ fun TimingCurveGraph(
         strokeWidth = 2.dp.toPx()
       )
 
+      // Draw 10,000 RPM reference bar (slightly visible orange)
+      val rpm10kX = rpmToX(10000f)
+      if (rpm10kX >= chartLeft && rpm10kX <= chartRight) {
+        drawLine(
+          color = Color(0xFFFF9800).copy(alpha = 0.5f),  // Orange with 30% opacity
+          start = Offset(rpm10kX, chartTop),
+          end = Offset(rpm10kX, chartBottom),
+          strokeWidth = 2.dp.toPx(),
+          cap = StrokeCap.Round
+        )
+      }
+
       // Draw current RPM indicator as a vertical bar UNDER the timing curve
       if (currentRpm != null && currentRpm > 0) {
         val rpmX = rpmToX(currentRpm.toFloat())

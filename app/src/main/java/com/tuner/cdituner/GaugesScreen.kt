@@ -2,10 +2,13 @@ package com.tuner.cdituner
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -23,6 +26,8 @@ fun GaugesScreen(
   cdiData: CdiReceivedMessageDecoder?,
   speedKmh: Float = 0f,
   hasGpsFix: Boolean = false,
+  batterySaverEnabled: Boolean = false,
+  onBatterySaverChanged: (Boolean) -> Unit = {},
   modifier: Modifier = Modifier
 ) {
   val gaugeColors = LocalGaugeColors.current
@@ -62,16 +67,18 @@ fun GaugesScreen(
         decimalPlaces = 0
       )
 
-      // GPS Speed Gauge
+      // GPS Speed Gauge (greyed out when battery saver is on)
       GaugeView(
-        value = speedKmh,
+        value = if (batterySaverEnabled) 0f else speedKmh,
         minValue = 0f,
         maxValue = 200f,
-        label = if (hasGpsFix) "GPS SPEED" else "NO GPS",
+        label = if (batterySaverEnabled) "GPS OFF" else if (hasGpsFix) "GPS SPEED" else "NO GPS",
         unit = "km/h",
-        modifier = Modifier.padding(4.dp),
+        modifier = Modifier
+          .padding(4.dp)
+          .alpha(if (batterySaverEnabled) 0.3f else 1f),
         size = 180.dp,
-        arcColor = Color(0xFF4CAF50), // Green for speed
+        arcColor = if (batterySaverEnabled) Color.Gray else Color(0xFF4CAF50), // Green for speed, grey when off
         warningThreshold = 120f,
         dangerThreshold = 160f,
         decimalPlaces = 0
@@ -112,10 +119,39 @@ fun GaugesScreen(
       )
     }
 
-    // Status indicators at bottom
+    // Battery Saver Switch and Status indicators at bottom
     Column(
       horizontalAlignment = Alignment.CenterHorizontally
     ) {
+      // Battery Saver Toggle
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+        modifier = Modifier.padding(vertical = 8.dp)
+      ) {
+        Text(
+          text = "🔋 Battery Saver",
+          color = gaugeColors.labelText,
+          fontSize = 14.sp,
+          fontWeight = FontWeight.Medium
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Switch(
+          checked = batterySaverEnabled,
+          onCheckedChange = onBatterySaverChanged,
+          colors = SwitchDefaults.colors(
+            checkedThumbColor = Color(0xFF4CAF50),
+            checkedTrackColor = Color(0xFF4CAF50).copy(alpha = 0.5f)
+          )
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+          text = if (batterySaverEnabled) "GPS OFF" else "GPS ON",
+          color = if (batterySaverEnabled) gaugeColors.labelText.copy(alpha = 0.7f) else Color(0xFF4CAF50),
+          fontSize = 12.sp
+        )
+      }
+
       if (cdiData == null) {
         Text(
           text = "Waiting for CDI connection...",
@@ -124,7 +160,7 @@ fun GaugesScreen(
           fontWeight = FontWeight.Medium
         )
       }
-      if (!hasGpsFix) {
+      if (!batterySaverEnabled && !hasGpsFix) {
         Text(
           text = "Acquiring GPS signal...",
           color = gaugeColors.labelText.copy(alpha = 0.7f),
