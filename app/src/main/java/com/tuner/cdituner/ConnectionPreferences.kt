@@ -14,6 +14,7 @@ class ConnectionPreferences(context: Context) {
     private const val KEY_LAST_CONNECTION_TYPE = "last_connection_type"
     private const val KEY_LAST_BLUETOOTH_ADDRESS = "last_bluetooth_address"
     private const val KEY_LAST_BLUETOOTH_NAME = "last_bluetooth_name"
+    private const val KEY_BATTERY_SAVER_ENABLED = "battery_saver_enabled"
   }
 
   private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -64,6 +65,23 @@ class ConnectionPreferences(context: Context) {
    */
   fun getLastBluetoothName(): String? {
     return prefs.getString(KEY_LAST_BLUETOOTH_NAME, null)
+  }
+
+  /**
+   * Save battery saver mode state (GPS disabled when true)
+   */
+  fun setBatterySaverEnabled(enabled: Boolean) {
+    prefs.edit()
+      .putBoolean(KEY_BATTERY_SAVER_ENABLED, enabled)
+      .apply()
+  }
+
+  /**
+   * Get battery saver mode state
+   * Returns false by default (GPS enabled)
+   */
+  fun isBatterySaverEnabled(): Boolean {
+    return prefs.getBoolean(KEY_BATTERY_SAVER_ENABLED, false)
   }
 
   /**

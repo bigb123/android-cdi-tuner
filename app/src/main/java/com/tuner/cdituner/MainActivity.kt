@@ -25,7 +25,11 @@ class MainActivity : ComponentActivity() {
   private lateinit var connectionManager: ConnectionManager
   private lateinit var speedProvider: SpeedProvider
   private lateinit var dataLogger: DataLogger
+  private lateinit var connectionPreferences: ConnectionPreferences
   private var deviceInfo by mutableStateOf<String?>(null)
+  
+  // Battery saver state (GPS disabled when true)
+  private var batterySaverEnabled by mutableStateOf(false)
   
   // Track if the app was launched by USB attachment (to skip auto-connect from preferences)
   private var launchedByUsb = false
@@ -66,6 +70,10 @@ class MainActivity : ComponentActivity() {
     // Initialize DataLogger for time-series logging
     dataLogger = DataLogger(this)
     dataLogger.loadFromFile() // Load previous session if available
+    
+    // Initialize preferences and load battery saver state
+    connectionPreferences = ConnectionPreferences(this)
+    batterySaverEnabled = connectionPreferences.isBatterySaverEnabled()
 
     // Check if launched by USB attachment
     launchedByUsb = handleIntent(intent)
@@ -75,8 +83,8 @@ class MainActivity : ComponentActivity() {
       connectionManager.autoConnectFromPreferences()
     }
     
-    // Start GPS updates if permission is already granted
-    if (speedProvider.hasLocationPermission()) {
+    // Start GPS updates if permission is already granted AND battery saver is off
+    if (!batterySaverEnabled && speedProvider.hasLocationPermission()) {
       speedProvider.startLocationUpdates()
     }
 
@@ -139,9 +147,9 @@ class MainActivity : ComponentActivity() {
     // Tab state - 0 = Gauges, 1 = Timing, 2 = Logging
     var selectedTab by remember { mutableIntStateOf(0) }
     
-    // Request location permission when Gauges tab is selected
-    LaunchedEffect(selectedTab) {
-      if (selectedTab == 0 && !speedProvider.hasLocationPermission()) {
+    // Request location permission when Gauges tab is selected (only if battery saver is off)
+    LaunchedEffect(selectedTab, batterySaverEnabled) {
+      if (selectedTab == 0 && !batterySaverEnabled && !speedProvider.hasLocationPermission()) {
         requestLocationPermission()
       }
     }
@@ -288,6 +296,18 @@ class MainActivity : ComponentActivity() {
               cdiData = cdiData,
               speedKmh = speedKmh,
               hasGpsFix = hasGpsFix,
+              batterySaverEnabled = batterySaverEnabled,
+              onBatterySaverChanged = { enabled ->
+                batterySaverEnabled = enabled
+                connectionPreferences.setBatterySaverEnabled(enabled)
+                if (enabled) {
+                  speedProvider.stopLocationUpdates()
+                } else if (speedProvider.hasLocationPermission()) {
+                  speedProvider.startLocationUpdates()
+                } else {
+                  requestLocationPermission()
+                }
+              },
               modifier = Modifier.fillMaxSize()
             )
           }
@@ -296,6 +316,7 @@ class MainActivity : ComponentActivity() {
             TimingScreen(
               timingMap = timingMap,
               statusMessage = timingMapStatus,
+              currentRpm = cdiData?.rpm,
               onRefresh = { connectionManager.refreshTimingMap() },
               onLockWithChanges = { updatedMap ->
                 // Write the updated timing map to CDI when user locks the chart (saves changes)

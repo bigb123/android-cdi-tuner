@@ -8,8 +8,9 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -20,6 +21,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tuner.cdituner.ui.theme.LocalGaugeColors
 import com.tuner.cdituner.ui.theme.LocalGraphColors
+import kotlinx.coroutines.launch
 
 /**
  * Data class representing a single point in the ignition timing curve.
@@ -84,6 +87,7 @@ private data class ChartDimensions(
 fun TimingScreen(
   timingMap: List<TimingPoint>?,
   statusMessage: String?,
+  currentRpm: Int? = null,
   onRefresh: () -> Unit,
   onPointClick: (Int, TimingPoint) -> Unit = { _, _ -> },
   onPointDrag: (Int, Int, Int) -> Unit = { _, _, _ -> },
@@ -120,13 +124,26 @@ fun TimingScreen(
   
   // The map to display - use editable copy if available, otherwise source
   val displayMap = editableTimingMap.value ?: timingMap
+  
+  // LazyListState for programmatic scrolling of the table
+  val tableListState = rememberLazyListState()
+  val coroutineScope = rememberCoroutineScope()
+  
+  // Scroll table to selected point when selection changes
+  LaunchedEffect(selectedPointIndex.value) {
+    selectedPointIndex.value?.let { index ->
+      coroutineScope.launch {
+        // Scroll to make the selected row visible (with some padding)
+        tableListState.animateScrollToItem(index)
+      }
+    }
+  }
 
   Column(
     modifier = modifier
       .fillMaxSize()
       .background(gaugeColors.gaugeBackground)
-      .padding(4.dp)
-      .verticalScroll(rememberScrollState()),
+      .padding(4.dp),
     horizontalAlignment = Alignment.CenterHorizontally
   ) {
     // Title row with refresh button
@@ -178,6 +195,7 @@ fun TimingScreen(
       TimingCurveGraph(
         timingCurve = displayMap,
         selectedIndex = selectedPointIndex.value,
+        currentRpm = currentRpm,
         isLocked = isLocked,
         hasUnsavedChanges = hasUnsavedChanges.value,
         canUndo = timingMapHistory.value.isNotEmpty(),
@@ -248,7 +266,15 @@ fun TimingScreen(
         timingCurve = displayMap,
         selectedIndex = selectedPointIndex.value,
         isLocked = isLocked.value,
-        modifier = Modifier.fillMaxWidth()
+        listState = tableListState,
+        onRowClick = { index, point ->
+          // Select the point on the graph when table row is clicked
+          selectedPointIndex.value = index
+          onPointClick(index, point)
+        },
+        modifier = Modifier
+          .fillMaxWidth()
+          .weight(1f)  // Take remaining space and be independently scrollable
       )
     } else {
       // No data yet - show placeholder
@@ -311,6 +337,7 @@ fun TimingScreen(
 fun TimingCurveGraph(
   timingCurve: List<TimingPoint>,
   selectedIndex: Int? = null,
+  currentRpm: Int? = null,
   isLocked: MutableState<Boolean> = mutableStateOf(true),
   hasUnsavedChanges: Boolean = false,
   canUndo: Boolean = false,
@@ -326,12 +353,12 @@ fun TimingCurveGraph(
   val gaugeColors = LocalGaugeColors.current
   val graphColors = LocalGraphColors.current
   val textMeasurer = rememberTextMeasurer()
-  
+
   // Helper function to get selection color based on lock state
   fun selectionColor(locked: Boolean, alpha: Float = 1f): Color {
     return if (locked) graphColors.safe.copy(alpha = alpha) else graphColors.unsafe.copy(alpha = alpha)
   }
-  
+
   val lineColor = selectionColor(isLocked.value)
   val gridColor = gaugeColors.labelText.copy(alpha = 0.2f)
   val axisColor = gaugeColors.labelText.copy(alpha = 0.6f)
@@ -627,7 +654,11 @@ fun TimingCurveGraph(
           val label = if (rpm >= 1000) "${rpm / 1000}k" else "$rpm"
           val textLayoutResult = textMeasurer.measure(
             text = label,
-            style = TextStyle(fontSize = 10.sp, color = textColor)
+            style = TextStyle(
+              fontSize = 16.sp,
+              fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+              color = textColor
+            )
           )
           drawText(
             textLayoutResult = textLayoutResult,
@@ -652,7 +683,7 @@ fun TimingCurveGraph(
           val label = "${timing}°"
           val textLayoutResult = textMeasurer.measure(
             text = label,
-            style = TextStyle(fontSize = 10.sp, color = textColor)
+            style = TextStyle(fontSize = 12.sp, color = textColor)
           )
           drawText(
             textLayoutResult = textLayoutResult,
@@ -675,6 +706,33 @@ fun TimingCurveGraph(
         end = Offset(chartRight, chartBottom),
         strokeWidth = 2.dp.toPx()
       )
+
+      // Draw 10,000 RPM reference bar (slightly visible orange)
+      val rpm10kX = rpmToX(10000f)
+      if (rpm10kX >= chartLeft && rpm10kX <= chartRight) {
+        drawLine(
+          color = Color(0xFFFF9800).copy(alpha = 0.5f),  // Orange with 50% opacity
+          start = Offset(rpm10kX, chartTop),
+          end = Offset(rpm10kX, chartBottom),
+          strokeWidth = 2.dp.toPx(),
+          cap = StrokeCap.Round
+        )
+      }
+
+      // Draw current RPM indicator as a vertical bar UNDER the timing curve
+      if (currentRpm != null && currentRpm > 0) {
+        val rpmX = rpmToX(currentRpm.toFloat())
+        // Only draw if the RPM is within the visible range
+        if (rpmX >= chartLeft && rpmX <= chartRight) {
+          drawLine(
+            color = Color.Blue.copy(alpha = 0.7f),
+            start = Offset(rpmX, chartTop),
+            end = Offset(rpmX, chartBottom),
+            strokeWidth = 3.dp.toPx(),
+            cap = StrokeCap.Round
+          )
+        }
+      }
 
       // Draw timing curve - clipped to chart area so it doesn't overlap Y-axis
       if (timingCurve.isNotEmpty()) {
@@ -820,9 +878,13 @@ fun TimingCurveGraph(
 
 /**
  * Composable that displays the timing curve data in a table format.
+ * Uses LazyColumn for independent scrolling within the screen.
  *
  * @param timingCurve List of timing points to display
  * @param selectedIndex Currently selected point index (null if none) - row will be highlighted
+ * @param isLocked Whether the chart is locked (affects selection color)
+ * @param listState LazyListState for programmatic scrolling (e.g., when chart point is clicked)
+ * @param onRowClick Callback when a row is clicked (index, point) - selects the point on the graph
  * @param modifier Modifier for the table
  */
 @Composable
@@ -830,6 +892,8 @@ fun TimingTable(
   timingCurve: List<TimingPoint>,
   selectedIndex: Int? = null,
   isLocked: Boolean = true,
+  listState: androidx.compose.foundation.lazy.LazyListState = rememberLazyListState(),
+  onRowClick: (Int, TimingPoint) -> Unit = { _, _ -> },
   modifier: Modifier = Modifier
 ) {
   val gaugeColors = LocalGaugeColors.current
@@ -841,7 +905,7 @@ fun TimingTable(
   }
 
   Column(modifier = modifier) {
-    // Header row
+    // Header row (fixed, not scrollable)
     Row(
       modifier = Modifier
         .fillMaxWidth()
@@ -865,36 +929,42 @@ fun TimingTable(
       )
     }
 
-    // Data rows
-    timingCurve.forEachIndexed { index, point ->
-      val isSelected = selectedIndex == index
-      Row(
-        modifier = Modifier
-          .fillMaxWidth()
-          .background(
-            when {
-              isSelected -> selectionColor(isLocked, 0.3f)
-              index % 2 == 0 -> Color.Transparent
-              else -> gaugeColors.labelText.copy(alpha = 0.05f)
-            }
+    // Data rows (scrollable independently)
+    LazyColumn(
+      state = listState,
+      modifier = Modifier.fillMaxSize()
+    ) {
+      itemsIndexed(timingCurve) { index, point ->
+        val isSelected = selectedIndex == index
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onRowClick(index, point) }
+            .background(
+              when {
+                isSelected -> selectionColor(isLocked, 0.3f)
+                index % 2 == 0 -> Color.Transparent
+                else -> gaugeColors.labelText.copy(alpha = 0.05f)
+              }
+            )
+            .padding(vertical = 6.dp, horizontal = 16.dp),
+          horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+          Text(
+            text = "${point.rpm}",
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (isSelected) graphColors.pointSelected else gaugeColors.labelText,
+            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+            modifier = Modifier.weight(1f)
           )
-          .padding(vertical = 6.dp, horizontal = 16.dp),
-        horizontalArrangement = Arrangement.SpaceBetween
-      ) {
-        Text(
-          text = "${point.rpm}",
-          style = MaterialTheme.typography.bodyMedium,
-          color = if (isSelected) graphColors.pointSelected else gaugeColors.labelText,
-          fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-          modifier = Modifier.weight(1f)
-        )
-        Text(
-          text = String.format("%.2f°", point.timingDegrees),
-          style = MaterialTheme.typography.bodyMedium,
-          color = if (isSelected) graphColors.pointSelected else gaugeColors.timingArc,
-          fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-          modifier = Modifier.weight(1f)
-        )
+          Text(
+            text = String.format("%.2f°", point.timingDegrees),
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (isSelected) graphColors.pointSelected else gaugeColors.timingArc,
+            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+            modifier = Modifier.weight(1f)
+          )
+        }
       }
     }
   }
