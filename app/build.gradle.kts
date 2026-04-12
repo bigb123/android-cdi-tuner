@@ -15,8 +15,8 @@ android {
         applicationId = "com.tuner.cdituner"
         minSdk = 28
         targetSdk = 36
-        versionCode = 54
-        versionName = "5.4"
+        versionCode = 60
+        versionName = "6.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
