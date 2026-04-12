@@ -12,6 +12,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -147,6 +149,9 @@ class MainActivity : ComponentActivity() {
     // Tab state - 0 = Gauges, 1 = Timing, 2 = Logging
     var selectedTab by remember { mutableIntStateOf(0) }
     
+    // Connection settings menu state
+    var showConnectionMenu by remember { mutableStateOf(false) }
+    
     // Request location permission when Gauges tab is selected (only if battery saver is off)
     LaunchedEffect(selectedTab, batterySaverEnabled) {
       if (selectedTab == 0 && !batterySaverEnabled && !speedProvider.hasLocationPermission()) {
@@ -176,84 +181,81 @@ class MainActivity : ComponentActivity() {
     Column(
       modifier = Modifier.fillMaxSize()
     ) {
-      // Connection Controls
-      Card(
+      // Top bar with connection status and settings menu
+      Row(
         modifier = Modifier
           .fillMaxWidth()
-          .padding(horizontal = 16.dp, vertical = 8.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+          .padding(horizontal = 8.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
       ) {
-        Column(
-          modifier = Modifier.padding(16.dp)
-        ) {
-          Text(
-            text = "Connection Settings",
-            style = MaterialTheme.typography.headlineSmall
-          )
-
-          Spacer(modifier = Modifier.height(8.dp))
-
-          // Connection status
-          Text(
-            text = "Status: $connectionStatus",
-            style = MaterialTheme.typography.bodyMedium,
-            color = when {
-              connectionStatus.contains("Connected") -> MaterialTheme.colorScheme.primary
-              connectionStatus.contains("Error") || connectionStatus.contains("failed") -> MaterialTheme.colorScheme.error
-              else -> MaterialTheme.colorScheme.onSurface
-            }
-          )
-
-          deviceInfo?.let {
-            Text(
-              text = it,
-              style = MaterialTheme.typography.bodySmall,
-              color = MaterialTheme.colorScheme.onSurfaceVariant
+        // Connection status indicator (compact)
+        Text(
+          text = connectionStatus,
+          style = MaterialTheme.typography.bodySmall,
+          color = when {
+            connectionStatus.contains("Connected") -> MaterialTheme.colorScheme.primary
+            connectionStatus.contains("Error") || connectionStatus.contains("failed") -> MaterialTheme.colorScheme.error
+            else -> MaterialTheme.colorScheme.onSurfaceVariant
+          }
+        )
+        
+        // Settings menu button
+        Box {
+          IconButton(onClick = { showConnectionMenu = true }) {
+            Icon(
+              imageVector = Icons.Default.Settings,
+              contentDescription = "Connection Settings"
             )
           }
-
-          Spacer(modifier = Modifier.height(16.dp))
-
-          // Connection buttons
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+          
+          // Dropdown menu for connection settings
+          DropdownMenu(
+            expanded = showConnectionMenu,
+            onDismissRequest = { showConnectionMenu = false }
           ) {
-            // USB Connect Button
-            Button(
-              onClick = { connectionManager.connectUsb() },
-              modifier = Modifier.weight(1f),
+            // USB Connect option
+            DropdownMenuItem(
+              text = {
+                Text(
+                  if (connectionType == ConnectionManager.ConnectionType.USB) "✓ USB (Connected)" else "USB"
+                )
+              },
+              onClick = {
+                connectionManager.connectUsb()
+                showConnectionMenu = false
+              },
               enabled = connectionType != ConnectionManager.ConnectionType.USB
-            ) {
-              Text("USB")
-            }
-
-            // Bluetooth Connect Button
-            Button(
+            )
+            
+            // Bluetooth Connect option
+            DropdownMenuItem(
+              text = {
+                Text(
+                  if (connectionType == ConnectionManager.ConnectionType.BLUETOOTH) "✓ Bluetooth (Connected)" else "Bluetooth"
+                )
+              },
               onClick = {
                 if (checkBluetoothPermissions()) {
                   connectionManager.showBluetoothDeviceSelector()
                 } else {
                   requestBluetoothPermissions()
                 }
+                showConnectionMenu = false
               },
-              modifier = Modifier.weight(1f),
               enabled = connectionType != ConnectionManager.ConnectionType.BLUETOOTH
-            ) {
-              Text("Bluetooth")
-            }
-
-            // Disconnect Button
+            )
+            
+            // Disconnect option (only show when connected)
             if (connectionType != ConnectionManager.ConnectionType.NONE) {
-              Button(
-                onClick = { connectionManager.disconnect() },
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.buttonColors(
-                  containerColor = MaterialTheme.colorScheme.error
-                )
-              ) {
-                Text("Disconnect")
-              }
+              HorizontalDivider()
+              DropdownMenuItem(
+                text = { Text("Disconnect", color = MaterialTheme.colorScheme.error) },
+                onClick = {
+                  connectionManager.disconnect()
+                  showConnectionMenu = false
+                }
+              )
             }
           }
         }
