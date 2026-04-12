@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -275,6 +276,69 @@ fun TimingScreen(
         modifier = Modifier
           .fillMaxWidth()
           .weight(1f)  // Take remaining space and be independently scrollable
+      )
+
+      // Large Up/Down buttons for timing adjustment (motorcycle-friendly)
+      // Enabled when a point is selected
+      // When locked: changes are written to CDI instantly
+      // When unlocked: changes are batched and saved when locking
+      TimingAdjustmentButtons(
+        enabled = selectedPointIndex.value != null,
+        isLocked = isLocked.value,
+        onIncrease = {
+          selectedPointIndex.value?.let { index ->
+            editableTimingMap.value?.let { currentMap ->
+              // Save current state to history before making changes (only when unlocked)
+              if (!isLocked.value) {
+                timingMapHistory.value = timingMapHistory.value + listOf(currentMap)
+              }
+              
+              val point = currentMap[index]
+              // Increase timing by 1 degree (100 raw units), max 50 degrees (5000 raw)
+              val newTimingRaw = (point.timingRaw + 100).coerceAtMost(5000)
+              val updatedMap = currentMap.toMutableList().apply {
+                this[index] = TimingPoint(point.rpm, newTimingRaw)
+              }
+              editableTimingMap.value = updatedMap
+              
+              if (isLocked.value) {
+                // When locked: write to CDI instantly
+                onLockWithChanges(updatedMap)
+              } else {
+                // When unlocked: mark as unsaved, will be saved when locking
+                hasUnsavedChanges.value = true
+              }
+              onPointDrag(index, point.rpm, newTimingRaw)
+            }
+          }
+        },
+        onDecrease = {
+          selectedPointIndex.value?.let { index ->
+            editableTimingMap.value?.let { currentMap ->
+              // Save current state to history before making changes (only when unlocked)
+              if (!isLocked.value) {
+                timingMapHistory.value = timingMapHistory.value + listOf(currentMap)
+              }
+              
+              val point = currentMap[index]
+              // Decrease timing by 1 degree (100 raw units), min 0 degrees
+              val newTimingRaw = (point.timingRaw - 100).coerceAtLeast(0)
+              val updatedMap = currentMap.toMutableList().apply {
+                this[index] = TimingPoint(point.rpm, newTimingRaw)
+              }
+              editableTimingMap.value = updatedMap
+              
+              if (isLocked.value) {
+                // When locked: write to CDI instantly
+                onLockWithChanges(updatedMap)
+              } else {
+                // When unlocked: mark as unsaved, will be saved when locking
+                hasUnsavedChanges.value = true
+              }
+              onPointDrag(index, point.rpm, newTimingRaw)
+            }
+          }
+        }
       )
     } else {
       // No data yet - show placeholder
@@ -967,5 +1031,94 @@ fun TimingTable(
         }
       }
     }
+  }
+}
+
+/**
+ * Large Up/Down buttons for adjusting timing by 1 degree.
+ * Designed to be large enough for motorcycle riders to tap easily while riding.
+ *
+ * @param enabled Whether the buttons are enabled (requires selected point)
+ * @param isLocked Whether the chart is locked (affects button color and behavior description)
+ * @param onIncrease Callback when Up button is pressed (increase timing by 1 degree)
+ * @param onDecrease Callback when Down button is pressed (decrease timing by 1 degree)
+ * @param modifier Modifier for the button row
+ */
+@Composable
+fun TimingAdjustmentButtons(
+  enabled: Boolean,
+  isLocked: Boolean = true,
+  onIncrease: () -> Unit,
+  onDecrease: () -> Unit,
+  modifier: Modifier = Modifier
+) {
+  val gaugeColors = LocalGaugeColors.current
+  val graphColors = LocalGraphColors.current
+
+  Row(
+    modifier = modifier
+      .fillMaxWidth()
+      .padding(horizontal = 16.dp, vertical = 8.dp),
+    horizontalArrangement = Arrangement.spacedBy(16.dp)
+  ) {
+    // Down button (decrease timing) - LEFT side
+    Button(
+      onClick = onDecrease,
+      enabled = enabled,
+      modifier = Modifier
+        .weight(1f)
+        .height(80.dp),  // Large height for easy tapping while riding
+      colors = ButtonDefaults.buttonColors(
+        containerColor = if (enabled) graphColors.unsafe.copy(alpha = 0.8f) else Color.Gray.copy(alpha = 0.3f),
+        contentColor = Color.White,
+        disabledContainerColor = Color.Gray.copy(alpha = 0.2f),
+        disabledContentColor = Color.Gray
+      )
+    ) {
+      Text(
+        text = "▼ -1°",
+        fontSize = 24.sp,
+        fontWeight = FontWeight.Bold
+      )
+    }
+
+    // Up button (increase timing) - RIGHT side
+    Button(
+      onClick = onIncrease,
+      enabled = enabled,
+      modifier = Modifier
+        .weight(1f)
+        .height(80.dp),  // Large height for easy tapping while riding
+      colors = ButtonDefaults.buttonColors(
+        containerColor = if (enabled) graphColors.safe.copy(alpha = 0.8f) else Color.Gray.copy(alpha = 0.3f),
+        contentColor = Color.White,
+        disabledContainerColor = Color.Gray.copy(alpha = 0.2f),
+        disabledContentColor = Color.Gray
+      )
+    ) {
+      Text(
+        text = "▲ +1°",
+        fontSize = 24.sp,
+        fontWeight = FontWeight.Bold
+      )
+    }
+  }
+
+  // Hint text when buttons are disabled
+  if (!enabled) {
+    Text(
+      text = "Select a point to adjust timing",
+      style = MaterialTheme.typography.bodySmall,
+      color = gaugeColors.labelText.copy(alpha = 0.6f),
+      modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+    )
+  } else {
+    // Show behavior hint based on lock state
+    Text(
+      text = if (isLocked) "🔒 Changes saved instantly" else "🔓 Changes saved when locking",
+      style = MaterialTheme.typography.bodySmall,
+      color = if (isLocked) graphColors.safe.copy(alpha = 0.7f) else graphColors.unsafe.copy(alpha = 0.7f),
+      modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+    )
   }
 }
