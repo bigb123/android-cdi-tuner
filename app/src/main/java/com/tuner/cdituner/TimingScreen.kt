@@ -715,7 +715,11 @@ fun TimingCurveGraph(
             strokeWidth = 1.dp.toPx()
           )
           // RPM labels
-          val label = if (rpm >= 1000) "${rpm / 1000}k" else "$rpm"
+          val label = when {
+            rpm >= 1000 && rpm % 1000 == 0 -> "${rpm / 1000}k"
+            rpm >= 1000 -> "%.1fk".format(rpm / 1000f)
+            else -> "$rpm"
+          }
           val textLayoutResult = textMeasurer.measure(
             text = label,
             style = TextStyle(
@@ -860,21 +864,6 @@ fun TimingCurveGraph(
           }
         }
       }
-
-      // Draw zoom indicator if zoomed in (show both X and Y zoom)
-      val isZoomedX = zoomX.floatValue > 1.01f
-      val isZoomedY = zoomY.floatValue > 1.01f
-      if (isZoomedX || isZoomedY) {
-        val zoomText = "%.1fx".format(zoomX.floatValue.coerceAtLeast(zoomY.floatValue))
-        val zoomTextLayout = textMeasurer.measure(
-          text = zoomText,
-          style = TextStyle(fontSize = 12.sp, color = textColor.copy(alpha = 0.7f))
-        )
-        drawText(
-          textLayoutResult = zoomTextLayout,
-          topLeft = Offset(chartRight - zoomTextLayout.size.width - 4.dp.toPx(), chartTop + 4.dp.toPx())
-        )
-      }
     }
     
     // Undo button overlay in top LEFT corner - positioned for right-handed users to avoid accidental clicks
@@ -911,13 +900,40 @@ fun TimingCurveGraph(
       )
     }
     
-    // Padlock button overlay in top right corner (offset left to not obscure last graph point)
+    // Zoom reset button in bottom right corner - only visible when zoomed in
+    val isZoomed = zoomX.floatValue > 1.01f || zoomY.floatValue > 1.01f
+    if (isZoomed) {
+      Box(
+        modifier = Modifier
+          .align(Alignment.BottomEnd)
+          .padding(end = 8.dp, bottom = 40.dp)
+          .background(
+            color = gaugeColors.labelText.copy(alpha = 0.3f),
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+          )
+          .clickable {
+            // Reset zoom and pan to default
+            zoomX.floatValue = 1f
+            zoomY.floatValue = 1f
+            panX.floatValue = 0f
+            panY.floatValue = 0f
+          }
+          .padding(8.dp)
+      ) {
+        Text(
+          text = "🔍",
+          fontSize = 24.sp
+        )
+      }
+    }
+    
+    // Padlock button overlay in top right corner
     // Green background when locked (safe), red background when unlocked (editable/danger)
     // When clicked to lock AND there are unsaved changes, the onLock callback saves the map to CDI
     Box(
       modifier = Modifier
         .align(Alignment.TopEnd)
-        .padding(end = 48.dp, top = 8.dp)
+        .padding(end = 8.dp, top = 8.dp)
         .background(
           color = selectionColor(isLocked.value, 0.4f),
           shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
